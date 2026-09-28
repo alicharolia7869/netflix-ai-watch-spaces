@@ -4,7 +4,7 @@ import { createWatchParty, joinWatchParty } from '../services/api';
 
 export function HostPartyModal({ isOpen, onClose, catalog = [], user, onPartyJoined, onOpenAuth }) {
   const [activeTab, setActiveTab] = useState('host'); // 'host' | 'join'
-  const [selectedContentId, setSelectedContentId] = useState(catalog[0]?._id || '');
+  const [selectedContentId, setSelectedContentId] = useState('');
   const [partyTitle, setPartyTitle] = useState('');
   const [joinPartyCode, setJoinPartyCode] = useState('');
   const [loading, setLoading] = useState(false);

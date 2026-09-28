@@ -25,7 +25,7 @@ export const API_BASE_URL = (() => {
     console.warn(
       `[Config Warning] VITE_API_URL is configured as "${cleanUrl}" in production. ` +
       `Browsers on user devices cannot connect to localhost. ` +
-      `Set VITE_API_URL in Vercel to your deployed FastAPI backend URL.`
+      `Set VITE_API_URL in Vercel to your deployed Node.js / Express backend URL.`
     );
   }
 

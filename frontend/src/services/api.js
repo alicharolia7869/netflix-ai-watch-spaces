@@ -60,22 +60,26 @@ async function request(endpoint, options = {}) {
     if (contentType.includes('text/html')) {
       const isMissingBackend = IS_PRODUCTION && !CONFIGURED_API_URL;
       const msg = isMissingBackend
-        ? 'FastAPI/Node backend is not connected. In Vercel Project Settings > Environment Variables, configure VITE_API_URL pointing to your backend host.'
+        ? 'Node.js Express backend is not connected. In Vercel Project Settings > Environment Variables, configure VITE_API_URL pointing to your deployed backend URL.'
         : `Endpoint returned HTML instead of JSON (${url}). Check that the API server is running.`;
       throw new ApiError(msg, res.status, 'HTML_RESPONSE_ERROR');
     }
 
     if (!res.ok) {
       let serverErrorMsg = `HTTP ${res.status}: ${res.statusText}`;
-      try {
-        const errorJson = await res.json();
-        if (errorJson?.message) {
-          serverErrorMsg = errorJson.message;
-        } else if (errorJson?.detail) {
-          serverErrorMsg = typeof errorJson.detail === 'string' ? errorJson.detail : JSON.stringify(errorJson.detail);
+      if (res.status === 404 && IS_PRODUCTION && !CONFIGURED_API_URL) {
+        serverErrorMsg = 'Node.js Express backend is not connected. In Vercel Project Settings > Environment Variables, configure VITE_API_URL pointing to your deployed backend URL.';
+      } else {
+        try {
+          const errorJson = await res.json();
+          if (errorJson?.message) {
+            serverErrorMsg = errorJson.message;
+          } else if (errorJson?.detail) {
+            serverErrorMsg = typeof errorJson.detail === 'string' ? errorJson.detail : JSON.stringify(errorJson.detail);
+          }
+        } catch {
+          // Ignore json parse error on error response
         }
-      } catch {
-        // Ignore json parse error on error response
       }
       throw new ApiError(serverErrorMsg, res.status, 'HTTP_ERROR');
     }
