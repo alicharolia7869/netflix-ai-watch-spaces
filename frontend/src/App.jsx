@@ -14,7 +14,8 @@ import {
   LogOut, 
   Globe, 
   Info,
-  Sparkles
+  Sparkles,
+  Server
 } from 'lucide-react';
 import { 
   getHealthStatus, 
@@ -29,6 +30,7 @@ import { AuthModal } from './components/AuthModal';
 import { HostPartyModal } from './components/HostPartyModal';
 import { ContentCatalog } from './components/ContentCatalog';
 import { WatchPartyRoom } from './components/WatchPartyRoom';
+import { BackendConfigModal } from './components/BackendConfigModal';
 
 function App() {
   // Navigation & View state
@@ -38,6 +40,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [hostModalOpen, setHostModalOpen] = useState(false);
+  const [backendModalOpen, setBackendModalOpen] = useState(false);
 
   // Content & Recommendations initialized with default catalog for instantaneous display
   const [catalog, setCatalog] = useState(initialCatalog);
@@ -253,7 +256,28 @@ function App() {
         </div>
 
         {/* Action Controls & User Account */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <button
+            onClick={() => setBackendModalOpen(true)}
+            style={{
+              background: healthData ? 'rgba(70, 211, 105, 0.1)' : 'rgba(229, 9, 20, 0.1)',
+              border: `1px solid ${healthData ? 'rgba(70, 211, 105, 0.3)' : 'rgba(229, 9, 20, 0.3)'}`,
+              borderRadius: 'var(--radius-sm)',
+              padding: '6px 12px',
+              fontSize: '0.78rem',
+              color: healthData ? '#46D369' : '#FF5A5F',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+            title="Configure / Test Deployed Backend Connection"
+          >
+            <Server size={13} />
+            <span>{healthData ? 'Backend Online' : (loadingHealth ? 'Connecting...' : 'Backend Offline')}</span>
+          </button>
+
           <button
             onClick={() => setHostModalOpen(true)}
             className="btn btn-primary"
@@ -345,15 +369,26 @@ function App() {
                 </p>
               </div>
 
-              <button
-                onClick={fetchSystemHealth}
-                className="btn btn-secondary"
-                style={{ padding: '8px 16px', fontSize: '0.85rem' }}
-                disabled={loadingHealth}
-              >
-                <RefreshCw size={14} className={loadingHealth ? 'spin-icon' : ''} />
-                Refresh Status
-              </button>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setBackendModalOpen(true)}
+                  className="btn btn-secondary"
+                  style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+                >
+                  <Server size={14} />
+                  Configure Backend URL
+                </button>
+
+                <button
+                  onClick={fetchSystemHealth}
+                  className="btn btn-secondary"
+                  style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+                  disabled={loadingHealth}
+                >
+                  <RefreshCw size={14} className={loadingHealth ? 'spin-icon' : ''} />
+                  Refresh Status
+                </button>
+              </div>
             </div>
 
             {/* Subsystem Health Cards Grid */}
@@ -593,6 +628,16 @@ function App() {
         user={user}
         onPartyJoined={handlePartyJoined}
         onOpenAuth={() => setAuthModalOpen(true)}
+      />
+
+      <BackendConfigModal
+        isOpen={backendModalOpen}
+        onClose={() => setBackendModalOpen(false)}
+        onConfigUpdated={() => {
+          fetchSystemHealth(true);
+          getCurrentUser().then((u) => setUser(u || null));
+          loadCatalogAndRecommendations(true);
+        }}
       />
     </div>
   );

@@ -1,4 +1,8 @@
-import { API_BASE_URL, IS_PRODUCTION, CONFIGURED_API_URL } from '../config/api.config';
+import {
+  getEffectiveApiUrl,
+  IS_PRODUCTION,
+  ENDPOINTS,
+} from '../config/api.config';
 
 export class ApiError extends Error {
   constructor(message, status = null, code = 'API_ERROR', details = null) {
@@ -33,10 +37,12 @@ export function removeAuthToken() {
 }
 
 /**
- * Universal fetch wrapper with JSON validation, token attachment, and production error formatting.
+ * Universal fetch wrapper with dynamic base URL resolution, token injection,
+ * and production-grade status error categorization.
  */
 async function request(endpoint, options = {}) {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const baseUrl = getEffectiveApiUrl();
+  const url = `${baseUrl}${endpoint}`;
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
@@ -56,32 +62,54 @@ async function request(endpoint, options = {}) {
 
     const contentType = res.headers.get('content-type') || '';
 
-    // Catch SPA rewrites returning HTML
+    // Catch SPA fallback rewrites returning HTML instead of JSON
     if (contentType.includes('text/html')) {
-      const isMissingBackend = IS_PRODUCTION && !CONFIGURED_API_URL;
-      const msg = isMissingBackend
-        ? 'Node.js Express backend is not connected. In Vercel Project Settings > Environment Variables, configure VITE_API_URL pointing to your deployed backend URL.'
-        : `Endpoint returned HTML instead of JSON (${url}). Check that the API server is running.`;
+      const hasNoBackend = IS_PRODUCTION && !baseUrl;
+      const msg = hasNoBackend
+        ? 'Node.js Express backend is not connected. In Vercel Project Settings → Environment Variables, configure VITE_API_URL pointing to your deployed backend URL.'
+        : `Backend endpoint returned HTML instead of JSON (${endpoint}). Verify that your Node.js server is online.`;
       throw new ApiError(msg, res.status, 'HTML_RESPONSE_ERROR');
     }
 
     if (!res.ok) {
-      let serverErrorMsg = `HTTP ${res.status}: ${res.statusText}`;
-      if (res.status === 404 && IS_PRODUCTION && !CONFIGURED_API_URL) {
-        serverErrorMsg = 'Node.js Express backend is not connected. In Vercel Project Settings > Environment Variables, configure VITE_API_URL pointing to your deployed backend URL.';
-      } else {
-        try {
-          const errorJson = await res.json();
-          if (errorJson?.message) {
-            serverErrorMsg = errorJson.message;
-          } else if (errorJson?.detail) {
-            serverErrorMsg = typeof errorJson.detail === 'string' ? errorJson.detail : JSON.stringify(errorJson.detail);
-          }
-        } catch {
-          // Ignore json parse error on error response
+      let serverErrorMsg = '';
+
+      // Try reading backend JSON error payload
+      try {
+        const errorJson = await res.json();
+        if (errorJson?.message) {
+          serverErrorMsg = errorJson.message;
+        } else if (errorJson?.error) {
+          serverErrorMsg = typeof errorJson.error === 'string' ? errorJson.error : JSON.stringify(errorJson.error);
+        } else if (errorJson?.detail) {
+          serverErrorMsg = typeof errorJson.detail === 'string' ? errorJson.detail : JSON.stringify(errorJson.detail);
+        }
+      } catch {
+        // Fallback to standard status interpretations
+      }
+
+      if (!serverErrorMsg) {
+        if (res.status === 400) {
+          serverErrorMsg = 'Invalid request. Please check your input.';
+        } else if (res.status === 401) {
+          serverErrorMsg = 'Your session has expired. Please sign in again.';
+        } else if (res.status === 403) {
+          serverErrorMsg = 'You do not have permission to perform this action.';
+        } else if (res.status === 404) {
+          const hasNoBackend = IS_PRODUCTION && !baseUrl;
+          serverErrorMsg = hasNoBackend
+            ? 'Node.js Express backend is not connected. In Vercel Project Settings → Environment Variables, configure VITE_API_URL pointing to your deployed backend URL.'
+            : `Endpoint not found (${endpoint}). Check that the API route exists on the server.`;
+        } else if (res.status === 409) {
+          serverErrorMsg = 'An account with this email already exists.';
+        } else if (res.status === 500) {
+          serverErrorMsg = 'Internal server error. Please try again later.';
+        } else {
+          serverErrorMsg = `HTTP Error ${res.status}: ${res.statusText || 'Unknown error'}`;
         }
       }
-      throw new ApiError(serverErrorMsg, res.status, 'HTTP_ERROR');
+
+      throw new ApiError(serverErrorMsg, res.status, `HTTP_${res.status}`);
     }
 
     return await res.json();
@@ -89,11 +117,13 @@ async function request(endpoint, options = {}) {
     if (err.name === 'AbortError') throw err;
     if (err instanceof ApiError) throw err;
 
+    // Detect browser network failure (e.g. server down, CORS rejection, offline)
     const isNetworkError = err instanceof TypeError && err.message.toLowerCase().includes('fetch');
     if (isNetworkError) {
-      const guidance = IS_PRODUCTION && !CONFIGURED_API_URL
-        ? 'Cannot connect to backend. VITE_API_URL is not set in Vercel project environment variables.'
-        : `Cannot reach backend at ${url || 'server'}. Ensure the backend service is running and CORS allows this origin.`;
+      const hasNoBackend = IS_PRODUCTION && !baseUrl;
+      const guidance = hasNoBackend
+        ? 'Cannot reach backend. In Vercel Project Settings → Environment Variables, set VITE_API_URL to your deployed backend URL.'
+        : `Unable to connect to the backend server at ${baseUrl || 'local'}. Ensure the backend service is running and CORS allows this origin.`;
       throw new ApiError(guidance, null, 'NETWORK_ERROR', err.message);
     }
 
@@ -103,12 +133,12 @@ async function request(endpoint, options = {}) {
 
 // System Health
 export async function getHealthStatus(signal) {
-  return request('/api/v1/health', { method: 'GET', signal });
+  return request(ENDPOINTS.HEALTH, { method: 'GET', signal });
 }
 
 // Authentication
 export async function registerUser({ name, email, password }) {
-  const data = await request('/api/auth/register', {
+  const data = await request(ENDPOINTS.AUTH_REGISTER, {
     method: 'POST',
     body: JSON.stringify({ name, email, password }),
   });
@@ -117,7 +147,7 @@ export async function registerUser({ name, email, password }) {
 }
 
 export async function loginUser({ email, password }) {
-  const data = await request('/api/auth/login', {
+  const data = await request(ENDPOINTS.AUTH_LOGIN, {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
@@ -129,10 +159,12 @@ export async function getCurrentUser() {
   const token = getAuthToken();
   if (!token) return null;
   try {
-    const data = await request('/api/auth/me', { method: 'GET' });
+    const data = await request(ENDPOINTS.AUTH_ME, { method: 'GET' });
     return data.user;
-  } catch {
-    removeAuthToken();
+  } catch (err) {
+    if (err.status === 401) {
+      removeAuthToken();
+    }
     return null;
   }
 }
@@ -148,44 +180,44 @@ export async function getContentCatalog(params = {}) {
   if (params.search) query.append('search', params.search);
   if (params.featured) query.append('featured', 'true');
   const qs = query.toString();
-  return request(`/api/content${qs ? `?${qs}` : ''}`, { method: 'GET' });
+  return request(`${ENDPOINTS.CONTENT}${qs ? `?${qs}` : ''}`, { method: 'GET' });
 }
 
 export async function getContentDetails(id) {
-  return request(`/api/content/${id}`, { method: 'GET' });
+  return request(`${ENDPOINTS.CONTENT}/${id}`, { method: 'GET' });
 }
 
 // Watch Parties
 export async function createWatchParty({ contentId, title }) {
-  return request('/api/parties', {
+  return request(ENDPOINTS.PARTIES, {
     method: 'POST',
     body: JSON.stringify({ contentId, title }),
   });
 }
 
 export async function getWatchParty(partyId) {
-  return request(`/api/parties/${partyId}`, { method: 'GET' });
+  return request(`${ENDPOINTS.PARTIES}/${partyId}`, { method: 'GET' });
 }
 
 export async function joinWatchParty(partyId) {
-  return request(`/api/parties/${partyId}/join`, { method: 'POST' });
+  return request(`${ENDPOINTS.PARTIES}/${partyId}/join`, { method: 'POST' });
 }
 
 export async function leaveWatchParty(partyId) {
-  return request(`/api/parties/${partyId}/leave`, { method: 'POST' });
+  return request(`${ENDPOINTS.PARTIES}/${partyId}/leave`, { method: 'POST' });
 }
 
 export async function endWatchParty(partyId) {
-  return request(`/api/parties/${partyId}`, { method: 'DELETE' });
+  return request(`${ENDPOINTS.PARTIES}/${partyId}`, { method: 'DELETE' });
 }
 
 // Messages
 export async function getPartyMessages(partyId) {
-  return request(`/api/parties/${partyId}/messages`, { method: 'GET' });
+  return request(`${ENDPOINTS.PARTIES}/${partyId}/messages`, { method: 'GET' });
 }
 
 export async function sendPartyMessage(partyId, { message, videoTime, type }) {
-  return request(`/api/parties/${partyId}/messages`, {
+  return request(`${ENDPOINTS.PARTIES}/${partyId}/messages`, {
     method: 'POST',
     body: JSON.stringify({ message, videoTime, type }),
   });
@@ -193,14 +225,14 @@ export async function sendPartyMessage(partyId, { message, videoTime, type }) {
 
 // AI Co-Pilot & Trivia
 export async function askAiCoPilot({ contentId, currentTime, question }) {
-  return request('/api/ai/ask', {
+  return request(ENDPOINTS.AI_ASK, {
     method: 'POST',
     body: JSON.stringify({ contentId, currentTime, question }),
   });
 }
 
 export async function getSceneTrivia({ contentId, currentTime }) {
-  return request('/api/ai/trivia', {
+  return request(ENDPOINTS.AI_TRIVIA, {
     method: 'POST',
     body: JSON.stringify({ contentId, currentTime }),
   });
@@ -208,11 +240,11 @@ export async function getSceneTrivia({ contentId, currentTime }) {
 
 // Narrative Variations & Voting
 export async function getPartyVotes(partyId) {
-  return request(`/api/parties/${partyId}/votes`, { method: 'GET' });
+  return request(`${ENDPOINTS.PARTIES}/${partyId}/votes`, { method: 'GET' });
 }
 
 export async function castPartyVote(partyId, { variationId, optionId }) {
-  return request(`/api/parties/${partyId}/vote`, {
+  return request(`${ENDPOINTS.PARTIES}/${partyId}/vote`, {
     method: 'POST',
     body: JSON.stringify({ variationId, optionId }),
   });
@@ -220,5 +252,5 @@ export async function castPartyVote(partyId, { variationId, optionId }) {
 
 // Recommendations
 export async function getRecommendations() {
-  return request('/api/recommendations', { method: 'GET' });
+  return request(ENDPOINTS.RECOMMENDATIONS, { method: 'GET' });
 }

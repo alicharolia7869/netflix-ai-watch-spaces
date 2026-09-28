@@ -32,25 +32,46 @@ const allowedOrigins = [
   'http://127.0.0.1:5173',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
+  'http://localhost:5000',
+  'http://127.0.0.1:5000',
   'https://frontend-ali-charolia.vercel.app',
   'https://frontend-snowy-nine-54.vercel.app',
 ];
 
 if (process.env.FRONTEND_URL) {
-  allowedOrigins.push(process.env.FRONTEND_URL.replace(/\/+$/, ''));
+  process.env.FRONTEND_URL.split(',').forEach((url) => {
+    const cleanUrl = url.trim().replace(/\/+$/, '');
+    if (cleanUrl && !allowedOrigins.includes(cleanUrl)) {
+      allowedOrigins.push(cleanUrl);
+    }
+  });
 }
+
+const isProduction = process.env.NODE_ENV === 'production';
 
 const corsOptions = {
   origin: (origin, callback) => {
+    // Allow non-browser requests (e.g. curl, server-to-server, health probes)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+
+    const isExplicitlyAllowed = allowedOrigins.includes(origin);
+    const isVercelPreview = origin.endsWith('.vercel.app');
+    const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
+
+    if (isExplicitlyAllowed || isVercelPreview || (!isProduction && isLocalhost)) {
       return callback(null, true);
     }
-    return callback(null, true); // Allow during dev / permissive preview
+
+    if (!isProduction) {
+      // In development, be permissive to facilitate testing
+      return callback(null, true);
+    }
+
+    return callback(new Error(`Origin ${origin} not allowed by CORS policy.`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 };
 
 // Security middleware
@@ -61,8 +82,13 @@ app.use(
   })
 );
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Health Check Endpoints (Mounted at root /health for cloud platforms, and /api for compatibility)
+app.use('/', healthRoutes);
+app.use('/api', healthRoutes);
 
 // Rate limiter for authentication routes
 const authLimiter = rateLimit({
@@ -81,7 +107,6 @@ app.use('/api/parties', chatRoutes);
 app.use('/api/parties', voteRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/recommendations', recommendationRoutes);
-app.use('/api', healthRoutes);
 
 // Root informational endpoint
 app.get('/', (req, res) => {

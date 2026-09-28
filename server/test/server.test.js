@@ -35,6 +35,7 @@ test.before(async () => {
   app.use('/api/parties', voteRoutes);
   app.use('/api/ai', aiRoutes);
   app.use('/api/recommendations', recommendationRoutes);
+  app.use('/', healthRoutes);
   app.use('/api', healthRoutes);
 
   server = http.createServer(app);
@@ -55,14 +56,21 @@ test.after(async () => {
   await disconnectDB();
 });
 
-test('GET /api/v1/health returns healthy status and DB metadata', async () => {
-  const res = await fetch(`${baseUrl}/api/v1/health`);
-  assert.equal(res.status, 200);
-  const data = await res.json();
-  assert.equal(data.status, 'healthy');
-  assert.equal(data.database.status, 'healthy');
-  assert.equal(data.realtime.engine, 'Socket.IO');
+test('GET /health and GET /api/v1/health return healthy status and DB metadata', async () => {
+  const res1 = await fetch(`${baseUrl}/health`);
+  assert.equal(res1.status, 200);
+  const data1 = await res1.json();
+  assert.equal(data1.status, 'ok');
+  assert.equal(data1.service, 'netflix-ai-watch-spaces-backend');
+  assert.equal(data1.database.status, 'healthy');
+  assert.equal(data1.realtime.engine, 'Socket.IO');
+
+  const res2 = await fetch(`${baseUrl}/api/v1/health`);
+  assert.equal(res2.status, 200);
+  const data2 = await res2.json();
+  assert.equal(data2.status, 'ok');
 });
+
 
 test('GET /api/content retrieves seeded catalog', async () => {
   const res = await fetch(`${baseUrl}/api/content`);

@@ -6,15 +6,14 @@ const router = express.Router();
 function getHealthPayload() {
   const dbStatus = getDbStatus();
   return {
-    status: dbStatus.isHealthy ? 'healthy' : 'degraded',
-    service: 'Netflix AI Watch Spaces (MERN Backend)',
+    status: dbStatus.isHealthy ? 'ok' : 'degraded',
+    service: 'netflix-ai-watch-spaces-backend',
     project_id: 'PROJ-NETF-260919',
     version: '2.0.0',
     environment: process.env.NODE_ENV || 'development',
     database: {
       status: dbStatus.isHealthy ? 'healthy' : 'degraded',
-      type: dbStatus.host.includes('in-memory') ? 'in-memory' : 'mongodb-atlas',
-      active_url: dbStatus.host,
+      type: dbStatus.type,
       database: dbStatus.name,
     },
     realtime: {
@@ -26,14 +25,15 @@ function getHealthPayload() {
   };
 }
 
-// GET /api/health
+// GET /health (Root Health Check for Cloud PaaS: Render, Railway, Fly.io, AWS)
 router.get('/health', (req, res) => {
   res.json(getHealthPayload());
 });
 
-// GET /api/v1/health (Frontend compatibility)
+// GET /v1/health & /api/v1/health (Frontend Compatibility)
 router.get('/v1/health', (req, res) => {
   res.json(getHealthPayload());
 });
 
 export default router;
+

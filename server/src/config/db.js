@@ -16,9 +16,13 @@ export async function connectDB() {
     } catch (err) {
       console.warn(`Could not connect to configured MONGODB_URI: ${err.message}`);
       if (process.env.NODE_ENV === 'production') {
-        throw err;
+        throw new Error(`Production MongoDB connection failed: ${err.message}`);
       }
     }
+  } else if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'MONGODB_URI is required in production mode. Please configure MONGODB_URI in your cloud environment settings.'
+    );
   }
 
   // Local / Test In-Memory MongoDB Fallback
@@ -55,10 +59,11 @@ export function getDbStatus() {
     3: 'disconnecting',
   };
   const state = mongoose.connection.readyState;
+  const isAtlas = Boolean(process.env.MONGODB_URI && !process.env.MONGODB_URI.includes('127.0.0.1'));
   return {
     state: stateMap[state] || 'unknown',
     isHealthy: state === 1,
-    host: mongoose.connection.host || 'in-memory',
+    type: isAtlas ? 'mongodb-atlas' : (mongoMemoryServer ? 'in-memory' : 'local-mongodb'),
     name: mongoose.connection.name || 'watchspaces',
   };
 }

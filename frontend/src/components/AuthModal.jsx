@@ -18,12 +18,24 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }) {
     setError(null);
 
     try {
+      if (isRegister) {
+        if (!name.trim()) throw new Error('Please enter your full name.');
+        if (name.trim().length < 2) throw new Error('Name must be at least 2 characters.');
+      }
+
+      if (!email.trim() || !email.includes('@')) {
+        throw new Error('Please enter a valid email address.');
+      }
+
+      if (!password || password.length < 6) {
+        throw new Error('Password must be at least 6 characters long.');
+      }
+
       let data;
       if (isRegister) {
-        if (!name.trim()) throw new Error('Please enter your name');
-        data = await registerUser({ name: name.trim(), email: email.trim(), password });
+        data = await registerUser({ name: name.trim(), email: email.trim().toLowerCase(), password });
       } else {
-        data = await loginUser({ email: email.trim(), password });
+        data = await loginUser({ email: email.trim().toLowerCase(), password });
       }
 
       onAuthSuccess(data.user);
@@ -39,6 +51,7 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }) {
     setIsRegister(false);
     setEmail('alex@netflix.ai');
     setPassword('Password123!');
+    setError(null);
   };
 
   return (

@@ -3,6 +3,13 @@ import { User } from '../models/User.js';
 
 export const JWT_SECRET = process.env.JWT_SECRET || 'dev-super-secret-jwt-key-change-in-production-2026';
 
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  console.warn(
+    '⚠️ [SECURITY WARNING] JWT_SECRET is not configured in production environment variables! Using fallback key. Set JWT_SECRET in your platform settings.'
+  );
+}
+
+
 export async function requireAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
