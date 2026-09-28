@@ -13,7 +13,8 @@ import {
   LogIn, 
   LogOut, 
   Globe, 
-  Info 
+  Info,
+  Sparkles
 } from 'lucide-react';
 import { 
   getHealthStatus, 
@@ -23,6 +24,7 @@ import {
   getRecommendations 
 } from './services/api';
 import { ENDPOINTS, CONFIGURED_API_URL, IS_PRODUCTION } from './config/api.config';
+import { initialCatalog } from './data/initialCatalog';
 import { AuthModal } from './components/AuthModal';
 import { HostPartyModal } from './components/HostPartyModal';
 import { ContentCatalog } from './components/ContentCatalog';
@@ -37,10 +39,10 @@ function App() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [hostModalOpen, setHostModalOpen] = useState(false);
 
-  // Content & Recommendations
-  const [catalog, setCatalog] = useState([]);
+  // Content & Recommendations initialized with default catalog for instantaneous display
+  const [catalog, setCatalog] = useState(initialCatalog);
   const [recommendations, setRecommendations] = useState([]);
-  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogLoading, setCatalogLoading] = useState(false);
 
   // Active Watch Party
   const [activeParty, setActiveParty] = useState(null);
