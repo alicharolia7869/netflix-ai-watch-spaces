@@ -1,76 +1,123 @@
 # Netflix AI Watch Spaces
 
-**Full-Stack Engineering Project**  
+**Full-Stack MERN Social Streaming Platform with Grounded AI Intelligence**  
 **Project ID:** `PROJ-NETF-260919`  
-**Track:** Full-Stack (React + FastAPI)  
+**Track:** Full-Stack MERN (React 19 + Node.js/Express + Socket.IO + Mongoose + MongoDB Atlas)
 
 ---
 
-## 1. Product Vision
+## 1. Architecture Overview
 
-Netflix AI Watch Spaces is an engineering-grade, real-time social streaming platform that blends synchronized video playback with a temporal, timeline-grounded AI Co-Pilot.
-
-Key Capabilities:
-- **Synchronized Playback:** Host-authoritative playback state machine (`play`, `pause`, `seek`, `buffering`) with sub-250ms drift correction across distributed clients.
-- **Timeline-Grounded AI Co-Pilot:** RAG-based context engine answering audience questions strictly grounded in pre-authored video metadata (characters, scene context, glossary) and citing source timeline entries.
-- **Interactive Narrative Variations & Trivia:** Dynamic timeline-triggered trivia cards and real-time voting on pre-authored subtitle/dialogue variations.
-- **Social Watch Rooms:** Real-time WebSocket chat, typing indicators, emoji reactions, presence tracking, and host moderation.
-- **Analytics & Recommendations:** Hybrid content/collaborative recommendations and watch session telemetry.
+```text
+                    ┌─────────────────────────┐
+                    │  React 19 Client (Vite) │
+                    │    Hosted on Vercel     │
+                    └────────────┬────────────┘
+                                 │
+                      REST API + Socket.IO
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │  Node.js / Express App  │
+                    │  Production Web Service │
+                    └────────────┬────────────┘
+                                 │
+             ┌───────────────────┼───────────────────┐
+             │                   │                   │
+             ▼                   ▼                   ▼
+       ┌───────────┐      ┌─────────────┐     ┌─────────────┐
+       │ Socket.IO │      │  AI Engine  │     │ Auth & APIs │
+       │ Sync Hub  │      └──────┬──────┘     └─────────────┘
+       └───────────┘             │
+                                 ▼
+                          ┌─────────────┐
+                          │ Scene RAG & │
+                          │ Timeline DB │
+                          └──────┬──────┘
+                                 │
+                                 ▼
+                          ┌─────────────┐
+                          │ LLM API /   │
+                          │ Fallback    │
+                          └─────────────┘
+                                 │
+                                 ▼
+                          ┌─────────────┐
+                          │   Mongoose  │
+                          └──────┬──────┘
+                                 │
+                                 ▼
+                          ┌─────────────┐
+                          │   MongoDB   │
+                          │    Atlas    │
+                          └─────────────┘
+```
 
 ---
 
-## 2. Technology Stack
+## 2. Core Capabilities
 
-- **Frontend:** React 19 + Vite (JavaScript / JSX)
-- **Styling:** Custom Vanilla CSS Design System (Dark cinematic Netflix-inspired aesthetic)
-- **Backend:** Python 3.11+ / FastAPI
-- **Database:** PostgreSQL (with automatic resilient SQLite fallback for zero-dependency local dev)
-- **ORM:** SQLAlchemy 2.0
-- **Real-Time:** FastAPI WebSockets
-- **Authentication:** JWT (JSON Web Tokens) + Passlib / Bcrypt password hashing
-- **Data Validation:** Pydantic v2
-- **Testing:** Pytest + HTTPX TestClient
-- **Environment Management:** Python-dotenv & Pydantic-Settings
+1. **Movie Catalog**: Browse open licensed creative-commons cinematic works (*Tears of Steel*, *Sintel*, *Big Buck Bunny*) with detailed scene breakdowns, duration, genre, and parental ratings.
+2. **Watch Party System**: Instant space generation with unique alphanumeric party codes (`wp-xxxxxx`), host authority, and live participant presence.
+3. **Sub-250ms Playback Synchronization**: Socket.IO bi-directional playback engine transmitting host `play`, `pause`, and `seek` commands with automated drift compensation.
+4. **Real-Time Watch Party Chat**: Live chat with timestamp tagging linked directly to current video playback time.
+5. **Timeline-Grounded AI Co-Pilot**: Active scene detection mapping the video's current second to pre-authored lore, character relationships, and key dialogue, returning grounded answers with timeline citations.
+6. **Approved Contextual Trivia**: Real-time filmmaking, easter egg, and behind-the-scenes facts tailored to the active scene.
+7. **Narrative & Localization Variations**: Viewers and hosts vote in real-time on alternate subtitle styles, soundtrack moods, and scene variations.
+8. **Personalized Recommendations**: Content-based recommendation scoring based on user watch history and favorite genres.
+9. **MongoDB Atlas Persistence**: Full Mongoose models for `User`, `Content`, `WatchParty`, `ChatMessage`, `Vote`, and `Recommendation`.
 
 ---
 
-## 3. Directory Structure
+## 3. Directory Layout
 
 ```text
 netflix-ai-watch-spaces/
-├── backend/
-│   ├── app/
-│   │   ├── ai/              # Grounded AI Content Engine & RAG
-│   │   ├── core/            # App settings and environment config
-│   │   ├── database/        # Engine, sessions, and DB health
-│   │   ├── models/          # SQLAlchemy database models
-│   │   ├── routers/         # REST API routers (health, auth, spaces, etc.)
-│   │   ├── schemas/         # Pydantic validation schemas
-│   │   ├── services/        # Business logic services
-│   │   ├── utils/           # Helper utilities
-│   │   ├── websocket/       # WebSocket hubs, presence, & sync manager
-│   │   └── main.py          # FastAPI application entrypoint
-│   ├── tests/               # Pytest automated test suites
-│   ├── requirements.txt     # Python backend dependencies
-│   └── .env                 # Backend environment file
-├── frontend/
+├── frontend/                     # React 19 Client SPA
 │   ├── src/
-│   │   ├── components/      # Reusable UI components
-│   │   ├── context/         # React Context providers (Auth, Sync)
-│   │   ├── hooks/           # Custom React hooks
-│   │   ├── pages/           # Application views
-│   │   ├── services/        # API and WebSocket client services
-│   │   ├── styles/          # Design system and CSS variables
-│   │   ├── utils/           # Formatters and math helpers
-│   │   ├── App.jsx          # Root application component
-│   │   └── main.jsx         # React DOM mount point
-│   ├── package.json
-│   └── vite.config.js       # Vite configuration with reverse proxy
-├── docs/                    # Architecture and API specifications
-├── docker-compose.yml       # Containerized multi-service deployment
-├── README.md                # Project documentation
-├── .env.example             # Documented environment template
-└── .gitignore               # Version control exclusions
+│   │   ├── components/
+│   │   │   ├── AuthModal.jsx     # Login / Register / Demo login
+│   │   │   ├── ContentCatalog.jsx# Movie browser & recommendations
+│   │   │   ├── HostPartyModal.jsx# Create / Join watch parties
+│   │   │   └── WatchPartyRoom.jsx# Synced player, chat, AI Co-Pilot, votes
+│   │   ├── config/
+│   │   │   └── api.config.js     # Universal URL & environment resolution
+│   │   ├── services/
+│   │   │   ├── api.js            # REST API client with error handling
+│   │   │   └── socket.js         # Socket.IO connection manager
+│   │   ├── styles/
+│   │   │   └── index.css         # Dark cinematic Netflix design system
+│   │   ├── App.jsx               # Main root app component
+│   │   └── main.jsx
+│   ├── vercel.json               # Vercel SPA routing (excludes /api/)
+│   └── package.json
+├── server/                       # Node.js + Express Backend
+│   ├── src/
+│   │   ├── config/
+│   │   │   └── db.js             # Mongoose MongoDB Atlas + In-Memory fallback
+│   │   ├── data/
+│   │   │   └── seedContent.js    # Seed catalog with scenes, trivia, variations
+│   │   ├── middleware/
+│   │   │   └── auth.js           # JWT authentication middleware
+│   │   ├── models/
+│   │   │   ├── User.js           # User schema & password hashing
+│   │   │   ├── Content.js        # Content, scenes, trivia, variations schema
+│   │   │   ├── WatchParty.js     # Party room state & playback schema
+│   │   │   ├── ChatMessage.js    # Chat messages with video timestamp
+│   │   │   ├── Vote.js           # Narrative variation voting schema
+│   │   │   └── Recommendation.js # Recommendation schema
+│   │   ├── routes/               # Express REST routers
+│   │   ├── services/
+│   │   │   ├── aiService.js      # Retrieval-grounded AI Co-Pilot & trivia
+│   │   │   ├── recommendationService.js # Content-based recommender
+│   │   │   └── seedService.js    # Initial catalog & demo user seeding
+│   │   ├── socket/
+│   │   │   └── socketHandler.js  # Socket.IO real-time synchronization hub
+│   │   └── index.js              # Server entrypoint with Helmet, CORS & Socket.IO
+│   ├── test/
+│   │   └── server.test.js        # 11 Automated integration tests
+│   └── package.json
+└── README.md
 ```
 
 ---
@@ -79,51 +126,47 @@ netflix-ai-watch-spaces/
 
 ### Prerequisites
 - Node.js (v18+) & npm
-- Python (3.11+)
 
-### 4.1 Backend Setup
-1. Open a terminal in the project root:
-   ```bash
-   # Windows PowerShell
-   backend\venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload
-   ```
-2. Interactive Swagger API Docs will be available at:
-   - `http://127.0.0.1:8000/api/v1/docs`
-   - Health endpoint: `http://127.0.0.1:8000/api/v1/health`
-
-### 4.2 Frontend Setup
-1. In another terminal:
-   ```bash
-   cd frontend
-   npm run dev
-   ```
-2. Open your browser at `http://localhost:5173`.
-   - The frontend automatically proxies API requests to port `8000`.
-
-### 4.3 Running Automated Tests
+### 4.1 Backend (Node.js + Express)
 ```bash
-backend\venv\Scripts\pytest.exe backend\tests -v
+cd server
+npm install
+npm run dev
 ```
+*Note: If no `MONGODB_URI` is provided, the backend automatically boots a resilient in-memory MongoDB engine for zero-dependency local development!*
+
+### 4.2 Frontend (React 19 + Vite)
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Open your browser at `http://localhost:5173`. Vite automatically proxies `/api` and `/socket.io` to port `5000`.
+
+### 4.3 Running Tests
+```bash
+cd server
+npm test
+```
+All 11 test suites verify authentication, catalog, watch parties, Socket.IO handlers, AI Q&A, trivia, votes, and recommendations.
 
 ---
 
-## 5. Development Roadmap & Status
+## 5. Deployment Guide
 
-| Phase | Description | Status |
-|---|---|---|
-| **Phase 1** | Architecture, Scaffolding, Health Check & Environment | **COMPLETE** |
-| **Phase 2** | Database Models, Alembic Migrations, Seed Data | Next Up |
-| **Phase 3** | Authentication, JWT, Roles & Protected Routes | Planned |
-| **Phase 4** | Watch Space Hub & Room Controls | Planned |
-| **Phase 5** | Real-Time Sync & Drift Engine | Planned |
-| **Phase 6** | Video Player & Synchronized UI | Planned |
-| **Phase 7** | Real-Time WebSocket Chat & Message Persistence | Planned |
-| **Phase 8** | AI Content Engine (Timeline-Grounded RAG) | Planned |
-| **Phase 9** | Interactive Trivia Engine | Planned |
-| **Phase 10** | Subtitle & Localization Variations | Planned |
-| **Phase 11** | Group Narrative Variation Voting | Planned |
-| **Phase 12** | Analytics Dashboard & Telemetry | Planned |
-| **Phase 13** | Hybrid Recommendation Engine | Planned |
-| **Phase 14** | Admin Timeline Management | Planned |
-| **Phase 15** | Automated Testing & Performance Verification | Planned |
-| **Phase 16** | Documentation & Final Demo Validation | Planned |
+### Frontend on Vercel
+1. Root directory in Vercel project settings: `frontend`.
+2. Add Environment Variable in Vercel:
+   - `VITE_API_URL`: Your deployed backend URL (e.g. `https://your-backend.railway.app` or `https://your-backend.onrender.com`).
+3. Deploy!
+
+### Backend on Node.js Host (Railway, Render, Fly.io, or AWS)
+1. Root directory: `server`.
+2. Configure Environment Variables:
+   - `PORT`: `5000` (or host provided port)
+   - `NODE_ENV`: `production`
+   - `MONGODB_URI`: Your MongoDB Atlas cluster connection string (`mongodb+srv://...`)
+   - `FRONTEND_URL`: `https://frontend-ali-charolia.vercel.app`
+   - `JWT_SECRET`: A secure 64-character random string
+   - `OPENAI_API_KEY`: (Optional) OpenAI API key for live GPT-4o-mini generation.
+3. Start command: `npm start` (runs `node src/index.js`).
