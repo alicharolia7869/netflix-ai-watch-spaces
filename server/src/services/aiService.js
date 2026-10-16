@@ -152,7 +152,7 @@ RULES:
       answer = `Currently in "${activeScene.title}" (${sceneRange}): ${activeScene.summary} Context: ${activeScene.context?.join(' ') || ''}`;
     }
   } else {
-    answer = `You are watching "${contentTitle}" at timestamp ${formattedTime}. ${context.contentDescription}`;
+    answer = `I don't have enough scene context to answer that accurately.`;
   }
 
   return {

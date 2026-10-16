@@ -130,6 +130,7 @@ const io = new Server(server, {
   cors: corsOptions,
   transports: ['websocket', 'polling'],
 });
+app.set('io', io);
 setupSocketIO(io);
 
 // 404 Handler

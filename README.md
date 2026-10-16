@@ -164,7 +164,7 @@ All 11 test suites verify authentication, catalog, watch parties, Socket.IO hand
 1. Root directory: `server`.
 2. Configure Environment Variables:
    - `PORT`: `5000` (or host provided port)
-   - `NODE_ENV`: `production`
+   - `NODE_ENV`: `production     `
    - `MONGODB_URI`: Your MongoDB Atlas cluster connection string (`mongodb+srv://...`)
    - `FRONTEND_URL`: `https://frontend-ali-charolia.vercel.app`
    - `JWT_SECRET`: A secure 64-character random string

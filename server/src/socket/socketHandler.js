@@ -2,19 +2,70 @@ import { WatchParty } from '../models/WatchParty.js';
 import { ChatMessage } from '../models/ChatMessage.js';
 import { Vote } from '../models/Vote.js';
 
-// In-memory playback state cache to avoid writing to MongoDB on every frame
-// partyId -> { currentTime, isPlaying, updatedAt, hostSocketId }
+// In-memory playback state cache
+// partyId -> { currentTime, isPlaying, updatedAt, hostId, hostSocketId }
 const partyPlaybackMemory = new Map();
+
+// In-memory active connected participants
+// partyId -> Map of socketId -> { socketId, userId, name, avatar, role, isOnline, joinedAt }
+const roomParticipants = new Map();
 
 export function setupSocketIO(io) {
   io.on('connection', (socket) => {
     let currentPartyId = null;
     let currentUser = null;
 
-    // Join Watch Party Room
+    // Helper: broadcast participant list
+    const broadcastParticipantRoster = (partyId) => {
+      const pId = partyId?.toLowerCase();
+      if (!pId || !roomParticipants.has(pId)) return;
+      const participants = Array.from(roomParticipants.get(pId).values());
+      io.to(pId).emit('party:participants', participants);
+    };
+
+    // Helper: leave current party
+    const handleLeaveParty = async () => {
+      if (!currentPartyId) return;
+      const pId = currentPartyId.toLowerCase();
+
+      if (roomParticipants.has(pId)) {
+        const pMap = roomParticipants.get(pId);
+        const leavingParticipant = pMap.get(socket.id) || currentUser;
+        pMap.delete(socket.id);
+
+        socket.to(pId).emit('party:participant_left', {
+          user: leavingParticipant,
+          timestamp: new Date().toISOString(),
+        });
+
+        broadcastParticipantRoster(pId);
+
+        if (pMap.size === 0) {
+          roomParticipants.delete(pId);
+        }
+      }
+
+      if (currentUser?.id) {
+        WatchParty.updateOne(
+          { partyId: pId, 'participants.userId': currentUser.id },
+          { $set: { 'participants.$.isOnline': false } }
+        ).catch(() => {});
+      }
+
+      socket.leave(pId);
+      currentPartyId = null;
+    };
+
+    // 1. Join Watch Party Room
     socket.on('party:join', async ({ partyId, user }) => {
       if (!partyId) return;
       const normalizedPartyId = partyId.toLowerCase();
+
+      // If user was previously in another room, leave it cleanly
+      if (currentPartyId && currentPartyId !== normalizedPartyId) {
+        await handleLeaveParty();
+      }
+
       currentPartyId = normalizedPartyId;
       currentUser = user || { name: 'Guest', id: socket.id };
 
@@ -26,6 +77,8 @@ export function setupSocketIO(io) {
           socket.emit('party:error', { message: 'Watch space does not exist.' });
           return;
         }
+
+        const isHost = party.hostId.toString() === (user?.id || '').toString();
 
         // Initialize in-memory playback if not present
         if (!partyPlaybackMemory.has(normalizedPartyId)) {
@@ -46,6 +99,23 @@ export function setupSocketIO(io) {
           syncedTime += elapsedSec;
         }
 
+        // Register participant in room roster
+        if (!roomParticipants.has(normalizedPartyId)) {
+          roomParticipants.set(normalizedPartyId, new Map());
+        }
+
+        const participantRecord = {
+          socketId: socket.id,
+          userId: user?.id || socket.id,
+          name: user?.name || 'Viewer',
+          avatar: user?.avatar || '',
+          role: isHost ? 'host' : 'viewer',
+          isOnline: true,
+          joinedAt: new Date().toISOString(),
+        };
+
+        roomParticipants.get(normalizedPartyId).set(socket.id, participantRecord);
+
         // Update online status in database
         if (user && user.id) {
           await WatchParty.updateOne(
@@ -60,46 +130,58 @@ export function setupSocketIO(io) {
           .limit(50)
           .lean();
 
-        // Send current synchronized state to joining client
+        // Send current synchronized room state to joining client
         socket.emit('party:state', {
           party,
           playback: {
             currentTime: syncedTime,
             isPlaying: memState.isPlaying,
             updatedAt: Date.now(),
+            serverTimestamp: Date.now(),
           },
           messages: recentMessages.reverse(),
+          participants: Array.from(roomParticipants.get(normalizedPartyId).values()),
         });
 
         // Broadcast participant joined event to room
         socket.to(normalizedPartyId).emit('party:participant_joined', {
-          user: currentUser,
+          user: participantRecord,
           timestamp: new Date().toISOString(),
         });
+
+        // Broadcast complete updated roster
+        broadcastParticipantRoster(normalizedPartyId);
       } catch (err) {
         console.error('Error in party:join socket handler:', err);
       }
     });
 
-    // Playback: Play
+    // 2. Playback: Play (Host Authorized)
     socket.on('playback:play', async ({ partyId, currentTime }) => {
       const pId = (partyId || currentPartyId)?.toLowerCase();
       if (!pId) return;
 
       const memState = partyPlaybackMemory.get(pId) || { hostId: null };
+
+      // Host control validation
+      const isHost = !memState.hostId || memState.hostId === (currentUser?.id || '').toString() || pId === 'solo-space';
+      if (!isHost) {
+        socket.emit('party:error', { message: 'Only the party host can control video playback.' });
+        return;
+      }
+
       memState.currentTime = Number(currentTime) || 0;
       memState.isPlaying = true;
       memState.updatedAt = Date.now();
       partyPlaybackMemory.set(pId, memState);
 
-      // Broadcast to all participants in the party
       io.to(pId).emit('playback:update', {
         currentTime: memState.currentTime,
         isPlaying: true,
         updatedAt: memState.updatedAt,
+        serverTimestamp: Date.now(),
       });
 
-      // Periodically persist state to MongoDB
       WatchParty.updateOne(
         { partyId: pId },
         {
@@ -112,12 +194,20 @@ export function setupSocketIO(io) {
       ).catch(() => {});
     });
 
-    // Playback: Pause
+    // 3. Playback: Pause (Host Authorized)
     socket.on('playback:pause', async ({ partyId, currentTime }) => {
       const pId = (partyId || currentPartyId)?.toLowerCase();
       if (!pId) return;
 
       const memState = partyPlaybackMemory.get(pId) || { hostId: null };
+
+      // Host control validation
+      const isHost = !memState.hostId || memState.hostId === (currentUser?.id || '').toString() || pId === 'solo-space';
+      if (!isHost) {
+        socket.emit('party:error', { message: 'Only the party host can control video playback.' });
+        return;
+      }
+
       memState.currentTime = Number(currentTime) || 0;
       memState.isPlaying = false;
       memState.updatedAt = Date.now();
@@ -127,6 +217,7 @@ export function setupSocketIO(io) {
         currentTime: memState.currentTime,
         isPlaying: false,
         updatedAt: memState.updatedAt,
+        serverTimestamp: Date.now(),
       });
 
       WatchParty.updateOne(
@@ -141,12 +232,20 @@ export function setupSocketIO(io) {
       ).catch(() => {});
     });
 
-    // Playback: Seek
+    // 4. Playback: Seek (Host Authorized)
     socket.on('playback:seek', async ({ partyId, currentTime }) => {
       const pId = (partyId || currentPartyId)?.toLowerCase();
       if (!pId) return;
 
       const memState = partyPlaybackMemory.get(pId) || { hostId: null };
+
+      // Host control validation
+      const isHost = !memState.hostId || memState.hostId === (currentUser?.id || '').toString() || pId === 'solo-space';
+      if (!isHost) {
+        socket.emit('party:error', { message: 'Only the party host can control video playback.' });
+        return;
+      }
+
       memState.currentTime = Number(currentTime) || 0;
       memState.updatedAt = Date.now();
       partyPlaybackMemory.set(pId, memState);
@@ -155,13 +254,19 @@ export function setupSocketIO(io) {
         currentTime: memState.currentTime,
         isPlaying: memState.isPlaying,
         updatedAt: memState.updatedAt,
+        serverTimestamp: Date.now(),
       });
     });
 
-    // Real-Time Chat Message
+    // 5. Real-Time Chat Message (Sanitized, Length Limited)
     socket.on('chat:message', async (data) => {
       const pId = (data.partyId || currentPartyId)?.toLowerCase();
       if (!pId || !data.message) return;
+
+      // Sanitize text and enforce max 500 characters
+      let sanitizedMessage = String(data.message).trim().slice(0, 500);
+      sanitizedMessage = sanitizedMessage.replace(/[<>]/g, '');
+      if (!sanitizedMessage) return;
 
       try {
         const savedMessage = await ChatMessage.create({
@@ -169,19 +274,33 @@ export function setupSocketIO(io) {
           userId: data.userId || currentUser?.id,
           userName: data.userName || currentUser?.name || 'Viewer',
           userAvatar: data.userAvatar || currentUser?.avatar || '',
-          message: data.message.trim(),
+          message: sanitizedMessage,
           videoTime: Number(data.videoTime) || 0,
           type: data.type || 'chat',
         });
 
-        // Broadcast to entire room including sender
         io.to(pId).emit('chat:message', savedMessage);
       } catch (err) {
         console.error('Error saving socket chat message:', err);
       }
     });
 
-    // Real-Time Narrative Variation Vote
+    // 6. Real-Time Emoji Reaction Dispatch
+    socket.on('reaction:send', ({ partyId, emoji, user }) => {
+      const pId = (partyId || currentPartyId)?.toLowerCase();
+      if (!pId || !emoji) return;
+
+      const reactionPayload = {
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        emoji: String(emoji).slice(0, 10),
+        user: user || currentUser || { name: 'Viewer' },
+        timestamp: Date.now(),
+      };
+
+      io.to(pId).emit('reaction:receive', reactionPayload);
+    });
+
+    // 7. Real-Time Narrative Variation Vote
     socket.on('vote:cast', async ({ partyId, variationId, optionId, user }) => {
       const pId = (partyId || currentPartyId)?.toLowerCase();
       if (!pId || !variationId || !optionId) return;
@@ -204,14 +323,12 @@ export function setupSocketIO(io) {
           }
         }
 
-        // Tally all votes for this variation
         const allVotes = await Vote.find({ partyId: pId, variationId }).lean();
         const optionsTally = {};
         allVotes.forEach((v) => {
           optionsTally[v.optionId] = (optionsTally[v.optionId] || 0) + 1;
         });
 
-        // Broadcast updated tally to all participants
         io.to(pId).emit('vote:update', {
           variationId,
           totalVotes: allVotes.length,
@@ -222,14 +339,10 @@ export function setupSocketIO(io) {
       }
     });
 
-    // Disconnect
-    socket.on('disconnect', () => {
-      if (currentPartyId && currentUser) {
-        socket.to(currentPartyId).emit('party:participant_left', {
-          user: currentUser,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    });
+    // 8. Leave Room
+    socket.on('party:leave', handleLeaveParty);
+
+    // 9. Disconnect cleanup
+    socket.on('disconnect', handleLeaveParty);
   });
 }

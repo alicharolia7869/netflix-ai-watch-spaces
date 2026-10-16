@@ -22,7 +22,9 @@ import {
   getCurrentUser, 
   logoutUser, 
   getContentCatalog, 
-  getRecommendations 
+  getRecommendations,
+  getWatchParty,
+  getContentDetails
 } from './services/api';
 import { ENDPOINTS, CONFIGURED_API_URL, IS_PRODUCTION } from './config/api.config';
 import { initialCatalog } from './data/initialCatalog';
@@ -46,6 +48,7 @@ function App() {
   const [catalog, setCatalog] = useState(initialCatalog);
   const [recommendations, setRecommendations] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState(null);
 
   // Active Watch Party
   const [activeParty, setActiveParty] = useState(null);
@@ -55,6 +58,16 @@ function App() {
   const [loadingHealth, setLoadingHealth] = useState(true);
   const [healthError, setHealthError] = useState(null);
   const [lastCheckTime, setLastCheckTime] = useState(null);
+
+  const navigateTo = useCallback((path, replace = false) => {
+    if (typeof window === 'undefined') return;
+    if (window.location.pathname === path) return;
+    if (replace) {
+      window.history.replaceState(null, '', path);
+    } else {
+      window.history.pushState(null, '', path);
+    }
+  }, []);
 
   const fetchSystemHealth = useCallback(async (isManual = false) => {
     if (isManual) setLoadingHealth(true);
@@ -74,18 +87,84 @@ function App() {
 
   const loadCatalogAndRecommendations = useCallback(async (isManual = false) => {
     if (isManual) setCatalogLoading(true);
+    setCatalogError(null);
     try {
       const catalogData = await getContentCatalog();
-      setCatalog(catalogData.items || []);
+      setCatalog(catalogData.items || (Array.isArray(catalogData) ? catalogData : []));
 
       const recData = await getRecommendations().catch(() => ({ items: [] }));
       setRecommendations(recData.items || []);
     } catch (err) {
       console.warn('Error loading catalog:', err.message);
+      setCatalogError(err.message);
     } finally {
       setCatalogLoading(false);
     }
   }, []);
+
+  // Handle URL Deep-Linking and Route Synchronization
+  const syncRouteWithUrl = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    const path = window.location.pathname.toLowerCase();
+
+    if (path.startsWith('/room/')) {
+      const partyCode = path.replace('/room/', '').trim();
+      if (partyCode) {
+        try {
+          const partyData = await getWatchParty(partyCode);
+          if (partyData) {
+            setActiveParty(partyData);
+            setCurrentView('watch_space');
+            return;
+          }
+        } catch (err) {
+          console.warn('Failed to restore room from URL:', err.message);
+        }
+      }
+    } else if (path.startsWith('/watch/')) {
+      const contentId = path.replace('/watch/', '').trim();
+      if (contentId) {
+        try {
+          const movie = await getContentDetails(contentId);
+          if (movie) {
+            setActiveParty({
+              partyId: 'solo-space',
+              contentId: movie,
+              title: `${movie.title} Solo Space`,
+              hostId: user?.id || 'viewer',
+              participants: [{ name: user?.name || 'Solo Viewer', role: 'host' }],
+            });
+            setCurrentView('watch_space');
+            return;
+          }
+        } catch (err) {
+          console.warn('Failed to restore movie from URL:', err.message);
+        }
+      }
+    } else if (path === '/health') {
+      setCurrentView('health');
+      return;
+    } else if (path === '/login' || path === '/signup') {
+      setAuthModalOpen(true);
+      setCurrentView('catalog');
+      return;
+    }
+
+    // Default to catalog for '/', '/catalog', '/movies'
+    setCurrentView('catalog');
+  }, [user]);
+
+  // Listen to browser popstate (back/forward)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      syncRouteWithUrl();
+    }, 0);
+    window.addEventListener('popstate', syncRouteWithUrl);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('popstate', syncRouteWithUrl);
+    };
+  }, [syncRouteWithUrl]);
 
   // Load active user, health, and catalog on mount
   useEffect(() => {
@@ -113,9 +192,11 @@ function App() {
 
     getContentCatalog()
       .then((catalogData) => {
-        if (isMounted) setCatalog(catalogData.items || []);
+        if (isMounted) setCatalog(catalogData.items || (Array.isArray(catalogData) ? catalogData : []));
       })
-      .catch(() => {})
+      .catch((err) => {
+        if (isMounted) setCatalogError(err.message);
+      })
       .finally(() => {
         if (isMounted) setCatalogLoading(false);
       });
@@ -139,11 +220,13 @@ function App() {
   const handlePartyJoined = (party) => {
     setActiveParty(party);
     setCurrentView('watch_space');
+    navigateTo(`/room/${party.partyId}`);
   };
 
   const handleLeaveParty = () => {
     setActiveParty(null);
     setCurrentView('catalog');
+    navigateTo('/catalog');
   };
 
   return (
@@ -167,7 +250,10 @@ function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
           {/* Brand */}
           <div
-            onClick={() => setCurrentView('catalog')}
+            onClick={() => {
+              setCurrentView('catalog');
+              navigateTo('/catalog');
+            }}
             style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}
           >
             <div style={{
@@ -192,7 +278,10 @@ function App() {
           {/* Navigation Tabs */}
           <nav style={{ display: 'flex', gap: '8px' }}>
             <button
-              onClick={() => setCurrentView('catalog')}
+              onClick={() => {
+                setCurrentView('catalog');
+                navigateTo('/catalog');
+              }}
               style={{
                 background: currentView === 'catalog' ? 'rgba(229, 9, 20, 0.15)' : 'transparent',
                 color: currentView === 'catalog' ? 'var(--color-primary)' : 'var(--color-text-muted)',
@@ -213,7 +302,10 @@ function App() {
 
             {activeParty && (
               <button
-                onClick={() => setCurrentView('watch_space')}
+                onClick={() => {
+                  setCurrentView('watch_space');
+                  navigateTo(`/room/${activeParty.partyId}`);
+                }}
                 style={{
                   background: currentView === 'watch_space' ? 'rgba(229, 9, 20, 0.15)' : 'transparent',
                   color: currentView === 'watch_space' ? 'var(--color-primary)' : 'var(--color-text-muted)',
@@ -234,7 +326,10 @@ function App() {
             )}
 
             <button
-              onClick={() => setCurrentView('health')}
+              onClick={() => {
+                setCurrentView('health');
+                navigateTo('/health');
+              }}
               style={{
                 background: currentView === 'health' ? 'rgba(229, 9, 20, 0.15)' : 'transparent',
                 color: currentView === 'health' ? 'var(--color-primary)' : 'var(--color-text-muted)',
@@ -315,7 +410,10 @@ function App() {
             </div>
           ) : (
             <button
-              onClick={() => setAuthModalOpen(true)}
+              onClick={() => {
+                setAuthModalOpen(true);
+                navigateTo('/login');
+              }}
               className="btn btn-secondary"
               style={{ padding: '8px 14px', fontSize: '0.85rem' }}
             >
@@ -334,6 +432,7 @@ function App() {
             catalog={catalog}
             recommendations={recommendations}
             loading={catalogLoading}
+            error={catalogError}
             onSelectMovie={(movie) => {
               // Quick solo watch space
               setActiveParty({
@@ -344,6 +443,7 @@ function App() {
                 participants: [{ name: user?.name || 'Solo Viewer', role: 'host' }],
               });
               setCurrentView('watch_space');
+              navigateTo(`/watch/${movie._id}`);
             }}
             onHostPartyForMovie={() => setHostModalOpen(true)}
           />

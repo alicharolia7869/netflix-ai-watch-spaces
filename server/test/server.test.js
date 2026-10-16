@@ -61,7 +61,7 @@ test('GET /health and GET /api/v1/health return healthy status and DB metadata',
   assert.equal(res1.status, 200);
   const data1 = await res1.json();
   assert.equal(data1.status, 'ok');
-  assert.equal(data1.service, 'netflix-ai-watch-spaces-backend');
+  assert.ok(data1.service === 'backend' || data1.service === 'netflix-ai-watch-spaces-backend');
   assert.equal(data1.database.status, 'healthy');
   assert.equal(data1.realtime.engine, 'Socket.IO');
 

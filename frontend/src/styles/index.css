@@ -191,3 +191,33 @@ button {
 ::-webkit-scrollbar-thumb:hover {
   background: #555560;
 }
+
+/* Floating Emoji Reactions Overlay */
+@keyframes floatUpFade {
+  0% {
+    transform: translateY(0) scale(0.8);
+    opacity: 0;
+  }
+  15% {
+    transform: translateY(-20px) scale(1.3);
+    opacity: 1;
+  }
+  75% {
+    transform: translateY(-120px) scale(1.1);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-180px) scale(0.9);
+    opacity: 0;
+  }
+}
+
+.floating-reaction {
+  position: absolute;
+  bottom: 60px;
+  pointer-events: none;
+  font-size: 2.2rem;
+  z-index: 40;
+  animation: floatUpFade 2.4s ease-out forwards;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.7));
+}

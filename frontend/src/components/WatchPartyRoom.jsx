@@ -25,11 +25,20 @@ function formatTimestamp(seconds) {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
+const EMOJI_REACTIONS = ['❤️', '🔥', '👏', '🍿', '😱', '😂'];
+
 export function WatchPartyRoom({ party, user, onLeaveParty }) {
-  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'ai' | 'trivia' | 'voting'
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'ai' | 'trivia' | 'voting' | 'participants'
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  // Participants roster
+  const [participants, setParticipants] = useState(party.participants || []);
+  const [participantNotification, setParticipantNotification] = useState(null);
+
+  // Floating reactions overlay
+  const [reactions, setReactions] = useState([]);
 
   // Chat state
   const [messages, setMessages] = useState([]);
@@ -54,9 +63,15 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
   const chatScrollRef = useRef(null);
 
   const content = party.contentId || {};
-  const isHost = party.hostId === user?.id || party.hostId?._id === user?.id;
 
-  // Active scene detection
+  // Host determination
+  const isHost = party.partyId === 'solo-space' ||
+    party.hostId === user?.id ||
+    party.hostId?._id === user?.id ||
+    party.hostId === user?._id ||
+    (party.participants && party.participants.some(p => (p.userId === user?.id || p.userId === user?._id) && p.role === 'host'));
+
+  // Active scene detection grounded in playback timeline
   const activeScene = (content.scenes || []).find(
     (s) => currentTime >= s.startTime && currentTime <= s.endTime
   ) || content.scenes?.[0] || null;
@@ -70,10 +85,20 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
       user: { id: user?.id, name: user?.name, avatar: user?.avatar },
     });
 
+    // Initial state upon joining
     socket.on('party:state', (data) => {
       if (data.playback && videoRef.current) {
         isRemoteSyncRef.current = true;
-        videoRef.current.currentTime = data.playback.currentTime;
+        let targetTime = Number(data.playback.currentTime) || 0;
+        const serverTime = data.playback.serverTimestamp || data.playback.updatedAt;
+        if (data.playback.isPlaying && serverTime) {
+          const elapsed = Math.max(0, (Date.now() - serverTime) / 1000);
+          targetTime += elapsed;
+        }
+
+        videoRef.current.currentTime = targetTime;
+        setCurrentTime(targetTime);
+
         if (data.playback.isPlaying) {
           videoRef.current.play().catch(() => {});
           setIsPlaying(true);
@@ -81,20 +106,56 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
           videoRef.current.pause();
           setIsPlaying(false);
         }
-        setTimeout(() => { isRemoteSyncRef.current = false; }, 300);
+        setTimeout(() => { isRemoteSyncRef.current = false; }, 400);
       }
+
       if (data.messages) {
         setMessages(data.messages);
       }
+
+      if (data.participants && data.participants.length > 0) {
+        setParticipants(data.participants);
+      }
     });
 
+    // Real-time participant roster updates
+    socket.on('party:participants', (roster) => {
+      if (Array.isArray(roster)) {
+        setParticipants(roster);
+      }
+    });
+
+    socket.on('party:participant_joined', ({ user: joinedUser }) => {
+      if (joinedUser) {
+        setParticipantNotification(`${joinedUser.name || 'A new viewer'} joined the watch space.`);
+        setTimeout(() => setParticipantNotification(null), 3000);
+      }
+    });
+
+    socket.on('party:participant_left', ({ user: leftUser }) => {
+      if (leftUser) {
+        setParticipantNotification(`${leftUser.name || 'A viewer'} left the space.`);
+        setTimeout(() => setParticipantNotification(null), 3000);
+      }
+    });
+
+    // Synchronized playback updates
     socket.on('playback:update', (data) => {
       if (!videoRef.current) return;
       isRemoteSyncRef.current = true;
 
-      const delta = Math.abs(videoRef.current.currentTime - data.currentTime);
-      if (delta > 0.25) {
-        videoRef.current.currentTime = data.currentTime;
+      let targetTime = Number(data.currentTime) || 0;
+      const serverTime = data.serverTimestamp || data.updatedAt;
+      if (data.isPlaying && serverTime) {
+        const elapsed = Math.max(0, (Date.now() - serverTime) / 1000);
+        targetTime += elapsed;
+      }
+
+      // Drift Correction Threshold (1.5 seconds)
+      const drift = Math.abs(videoRef.current.currentTime - targetTime);
+      if (drift > 1.5) {
+        videoRef.current.currentTime = targetTime;
+        setCurrentTime(targetTime);
       }
 
       if (data.isPlaying && videoRef.current.paused) {
@@ -105,13 +166,34 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
         setIsPlaying(false);
       }
 
-      setTimeout(() => { isRemoteSyncRef.current = false; }, 300);
+      setTimeout(() => { isRemoteSyncRef.current = false; }, 400);
     });
 
+    // Live chat messages
     socket.on('chat:message', (newMsg) => {
       setMessages((prev) => [...prev, newMsg]);
     });
 
+    // Live emoji reactions
+    socket.on('reaction:receive', (reactionPayload) => {
+      const reactionId = reactionPayload.id || `${Date.now()}-${Math.random()}`;
+      const randomLeft = Math.floor(15 + Math.random() * 70); // 15% to 85% width
+
+      const newReaction = {
+        id: reactionId,
+        emoji: reactionPayload.emoji,
+        left: `${randomLeft}%`,
+        userName: reactionPayload.user?.name || 'Viewer',
+      };
+
+      setReactions((prev) => [...prev.slice(-15), newReaction]);
+
+      setTimeout(() => {
+        setReactions((prev) => prev.filter((r) => r.id !== reactionId));
+      }, 2400);
+    });
+
+    // Live variation votes
     socket.on('vote:update', ({ variationId, totalVotes, optionsTally }) => {
       setVotesData((prev) => ({
         ...prev,
@@ -121,8 +203,12 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
 
     return () => {
       socket.off('party:state');
+      socket.off('party:participants');
+      socket.off('party:participant_joined');
+      socket.off('party:participant_left');
       socket.off('playback:update');
       socket.off('chat:message');
+      socket.off('reaction:receive');
       socket.off('vote:update');
     };
   }, [party.partyId, user]);
@@ -145,7 +231,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
 
   // Handle Play/Pause by Host
   const togglePlayPause = () => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || !isHost) return;
     const socket = getSocket();
     const time = videoRef.current.currentTime;
 
@@ -180,7 +266,8 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
   // Send Chat message
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
+    const cleanMsg = chatInput.trim().slice(0, 500);
+    if (!cleanMsg) return;
 
     const socket = getSocket();
     const payload = {
@@ -188,7 +275,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
       userId: user?.id,
       userName: user?.name || 'Viewer',
       userAvatar: user?.avatar || '',
-      message: chatInput.trim(),
+      message: cleanMsg,
       videoTime: currentTime,
     };
 
@@ -196,14 +283,26 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
     setChatInput('');
   };
 
-  // Quick timestamp jump
+  // Send Live Reaction
+  const handleSendReaction = (emoji) => {
+    const socket = getSocket();
+    socket.emit('reaction:send', {
+      partyId: party.partyId,
+      emoji,
+      user: { id: user?.id, name: user?.name, avatar: user?.avatar },
+    });
+  };
+
+  // Quick timestamp jump (Host only seeks room; guests seek locally)
   const jumpToTime = (timestamp) => {
     if (videoRef.current && isHost) {
       videoRef.current.currentTime = timestamp;
+      setCurrentTime(timestamp);
       const socket = getSocket();
       socket.emit('playback:seek', { partyId: party.partyId, currentTime: timestamp });
     } else if (videoRef.current) {
       videoRef.current.currentTime = timestamp;
+      setCurrentTime(timestamp);
     }
   };
 
@@ -263,8 +362,30 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
+  const activeParticipantsCount = participants.length > 0 ? participants.length : 1;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minHeight: '85vh' }}>
+      {/* Toast Notification for Join/Leave */}
+      {participantNotification && (
+        <div style={{
+          position: 'fixed',
+          top: '80px',
+          right: '24px',
+          zIndex: 1000,
+          background: 'rgba(20, 20, 24, 0.95)',
+          border: '1px solid var(--color-primary)',
+          color: 'var(--color-text-bright)',
+          padding: '10px 18px',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: '0.85rem',
+          boxShadow: 'var(--shadow-glow)',
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          {participantNotification}
+        </div>
+      )}
+
       {/* Space Header Toolbar */}
       <div className="glass-panel" style={{
         padding: '16px 24px',
@@ -278,9 +399,13 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>{content.title || party.title}</h2>
-              {isHost && (
+              {isHost ? (
                 <span className="badge badge-primary" style={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <Crown size={12} /> HOST
+                  <Crown size={12} /> ROOM HOST
+                </span>
+              ) : (
+                <span className="badge badge-secondary" style={{ fontSize: '0.65rem' }}>
+                  VIEWER
                 </span>
               )}
             </div>
@@ -308,22 +433,28 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div className="badge badge-success" style={{ fontSize: '0.75rem' }}>
             <span className="pulse-dot" />
-            SUB-250MS SYNC ACTIVE
+            REAL-TIME SYNC ACTIVE
           </div>
 
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: 'var(--color-bg-base)',
-            padding: '6px 12px',
-            borderRadius: 'var(--radius-sm)',
-            fontSize: '0.8rem',
-            border: '1px solid var(--color-border-subtle)'
-          }}>
+          <button
+            onClick={() => setActiveTab('participants')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: activeTab === 'participants' ? 'rgba(0, 113, 227, 0.2)' : 'var(--color-bg-base)',
+              padding: '6px 12px',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.8rem',
+              border: activeTab === 'participants' ? '1px solid #0071E3' : '1px solid var(--color-border-subtle)',
+              color: 'var(--color-text-bright)',
+              cursor: 'pointer'
+            }}
+            title="View Room Participants"
+          >
             <Users size={14} color="#0071E3" />
-            <span>{party.participants?.length || 1} Viewers</span>
-          </div>
+            <span>{activeParticipantsCount} {activeParticipantsCount === 1 ? 'Viewer' : 'Viewers'}</span>
+          </button>
 
           <button
             onClick={onLeaveParty}
@@ -364,6 +495,17 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
 
+            {/* Floating Reactions Animated Overlay */}
+            {reactions.map((r) => (
+              <div
+                key={r.id}
+                className="floating-reaction"
+                style={{ left: r.left }}
+              >
+                {r.emoji}
+              </div>
+            ))}
+
             {/* Active Scene Overlay HUD */}
             {activeScene && (
               <div style={{
@@ -391,6 +533,41 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
             )}
           </div>
 
+          {/* Emoji Reactions Quick Bar */}
+          <div className="glass-panel" style={{
+            padding: '10px 18px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '10px'
+          }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+              Live Reactions:
+            </span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {EMOJI_REACTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  onClick={() => handleSendReaction(emoji)}
+                  style={{
+                    background: 'var(--color-bg-base)',
+                    border: '1px solid var(--color-border-subtle)',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '1.25rem',
+                    padding: '4px 10px',
+                    cursor: 'pointer',
+                    transition: 'transform 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.2)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                  title={`Send ${emoji} reaction`}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Synchronized Player Control Bar */}
           <div className="glass-panel" style={{
             padding: '14px 20px',
@@ -401,14 +578,17 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
             <button
               onClick={togglePlayPause}
               className="btn btn-primary"
+              disabled={!isHost}
               style={{
                 width: '42px',
                 height: '42px',
                 borderRadius: '50%',
                 padding: 0,
-                flexShrink: 0
+                flexShrink: 0,
+                opacity: isHost ? 1 : 0.6,
+                cursor: isHost ? 'pointer' : 'not-allowed'
               }}
-              title={isHost ? (isPlaying ? 'Pause' : 'Play') : 'Synchronized to Host'}
+              title={isHost ? (isPlaying ? 'Pause' : 'Play') : 'Playback is synchronized to Room Host'}
             >
               {isPlaying ? <Pause size={18} /> : <Play size={18} style={{ marginLeft: '2px' }} />}
             </button>
@@ -430,11 +610,12 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
                 cursor: isHost ? 'pointer' : 'not-allowed',
                 accentColor: 'var(--color-primary)'
               }}
+              title={isHost ? 'Seek video timeline' : 'Only the Host can seek playback'}
             />
 
             {!isHost && (
-              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                Host-Controlled
+              <span style={{ fontSize: '0.75rem', color: '#FFB800', background: 'rgba(255,184,0,0.1)', padding: '4px 8px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+                👑 Host Controlled
               </span>
             )}
           </div>
@@ -488,6 +669,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
           }}>
             {[
               { id: 'chat', label: 'Chat', icon: MessageSquare },
+              { id: 'participants', label: `Users (${activeParticipantsCount})`, icon: Users },
               { id: 'ai', label: 'AI Co-Pilot', icon: Sparkles },
               { id: 'trivia', label: 'Trivia', icon: HelpCircle },
               { id: 'voting', label: 'Variations', icon: VoteIcon },
@@ -500,8 +682,8 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
                   onClick={() => setActiveTab(tab.id)}
                   style={{
                     flex: 1,
-                    padding: '12px 6px',
-                    fontSize: '0.8rem',
+                    padding: '10px 4px',
+                    fontSize: '0.75rem',
                     fontWeight: 600,
                     background: isActive ? 'rgba(229, 9, 20, 0.08)' : 'transparent',
                     color: isActive ? 'var(--color-primary)' : 'var(--color-text-muted)',
@@ -513,7 +695,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
                     cursor: 'pointer'
                   }}
                 >
-                  <Icon size={16} />
+                  <Icon size={15} />
                   {tab.label}
                 </button>
               );
@@ -595,6 +777,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
                 <input
                   type="text"
                   value={chatInput}
+                  maxLength={500}
                   onChange={(e) => setChatInput(e.target.value)}
                   placeholder={`Chat as ${user?.name || 'Viewer'}...`}
                   style={{
@@ -619,7 +802,79 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
             </div>
           )}
 
-          {/* TAB 2: AI Co-Pilot (Grounded Temporal RAG) */}
+          {/* TAB 2: Live Room Participants */}
+          {activeTab === 'participants' && (
+            <div style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
+                Connected Viewers ({activeParticipantsCount}):
+              </div>
+
+              {participants.length === 0 ? (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  background: 'var(--color-bg-base)',
+                  padding: '12px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--color-border-subtle)'
+                }}>
+                  <div style={{ position: 'relative' }}>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>
+                      {user?.name?.[0] || 'V'}
+                    </div>
+                    <span className="pulse-dot" style={{ position: 'absolute', bottom: '0', right: '0', color: 'var(--color-success)' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-bright)' }}>
+                      {user?.name || 'Viewer'} (You)
+                    </div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+                      {isHost ? '👑 Space Host' : 'Viewer'}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                participants.map((p, idx) => (
+                  <div
+                    key={p.socketId || idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      background: 'var(--color-bg-base)',
+                      padding: '10px 14px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--color-border-subtle)'
+                    }}
+                  >
+                    <div style={{ position: 'relative' }}>
+                      <img
+                        src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(p.name || 'Viewer')}`}
+                        alt={p.name}
+                        style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover' }}
+                      />
+                      <span className="pulse-dot" style={{ position: 'absolute', bottom: '-2px', right: '-2px', color: 'var(--color-success)' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-bright)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>{p.name}</span>
+                        {(p.userId === user?.id || p.userId === user?._id) && (
+                          <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>(You)</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: p.role === 'host' ? '#FFB800' : 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        {p.role === 'host' && <Crown size={11} />}
+                        {p.role === 'host' ? 'Space Host' : 'Active Viewer'}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: AI Co-Pilot (Grounded Temporal RAG) */}
           {activeTab === 'ai' && (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', overflowY: 'auto' }}>
               <div style={{
@@ -718,7 +973,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
             </div>
           )}
 
-          {/* TAB 3: Scene Trivia */}
+          {/* TAB 4: Scene Trivia */}
           {activeTab === 'trivia' && (
             <div style={{ flex: 1, padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div style={{
@@ -754,7 +1009,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
             </div>
           )}
 
-          {/* TAB 4: Narrative & Subtitle Variations Voting */}
+          {/* TAB 5: Narrative & Subtitle Variations Voting */}
           {activeTab === 'voting' && (
             <div style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>

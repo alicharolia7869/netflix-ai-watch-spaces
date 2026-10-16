@@ -23,20 +23,27 @@ router.get('/:partyId/messages', async (req, res) => {
 // POST /api/parties/:partyId/messages
 router.post('/:partyId/messages', requireAuth, async (req, res) => {
   try {
-    const { message, videoTime, type } = req.body;
-    if (!message || !message.trim()) {
-      return res.status(400).json({ message: 'Message content is required.' });
+    let sanitizedMessage = String(message || '').trim().slice(0, 500);
+    sanitizedMessage = sanitizedMessage.replace(/[<>]/g, '');
+    if (!sanitizedMessage) {
+      return res.status(400).json({ message: 'Valid message content is required.' });
     }
 
+    const pId = req.params.partyId.toLowerCase();
     const newMessage = await ChatMessage.create({
-      partyId: req.params.partyId.toLowerCase(),
+      partyId: pId,
       userId: req.user._id,
       userName: req.user.name,
       userAvatar: req.user.avatar,
-      message: message.trim(),
+      message: sanitizedMessage,
       videoTime: Number(videoTime) || 0,
       type: type || 'chat',
     });
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(pId).emit('chat:message', newMessage);
+    }
 
     return res.status(201).json(newMessage);
   } catch (err) {

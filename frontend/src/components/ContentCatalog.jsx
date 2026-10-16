@@ -1,15 +1,43 @@
 import React, { useState } from 'react';
-import { Play, Users, Search, Sparkles, Film, Clock, Star, Layers } from 'lucide-react';
+import { 
+  Play, 
+  Users, 
+  Search, 
+  Sparkles, 
+  Film, 
+  Clock, 
+  Star, 
+  Layers, 
+  Info, 
+  X, 
+  HelpCircle 
+} from 'lucide-react';
+
+function formatDuration(seconds) {
+  const s = Math.max(0, Math.floor(seconds || 0));
+  const mins = Math.floor(s / 60);
+  const secs = s % 60;
+  return `${mins}m ${secs.toString().padStart(2, '0')}s`;
+}
+
+function formatTimestamp(seconds) {
+  const s = Math.max(0, Math.floor(seconds || 0));
+  const mins = Math.floor(s / 60);
+  const secs = s % 60;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
 
 export function ContentCatalog({
   catalog = [],
   recommendations = [],
   loading = false,
+  error = null,
   onSelectMovie,
   onHostPartyForMovie,
 }) {
   const [selectedGenre, setSelectedGenre] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [detailsMovie, setDetailsMovie] = useState(null);
 
   const genres = ['All', 'Sci-Fi', 'Animation', 'Action', 'Drama', 'Comedy'];
 
@@ -43,13 +71,16 @@ export function ContentCatalog({
           border: '1px solid var(--color-border-subtle)'
         }}>
           <div style={{ maxWidth: '680px', zIndex: 10 }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
               <span className="badge badge-primary">FEATURED SPOTLIGHT</span>
               <span style={{ fontSize: '0.8rem', color: '#FFB800', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <Star size={14} fill="#FFB800" /> {featured.rating}
               </span>
               <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
                 {featured.releaseYear} • {Math.floor(featured.duration / 60)} min
+              </span>
+              <span className="badge badge-secondary" style={{ fontSize: '0.7rem' }}>
+                {featured.parentalRating || 'PG-13'}
               </span>
             </div>
 
@@ -61,22 +92,30 @@ export function ContentCatalog({
               {featured.description}
             </p>
 
-            <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
               <button
-                onClick={() => onHostPartyForMovie(featured)}
+                onClick={() => onSelectMovie(featured)}
                 className="btn btn-primary"
                 style={{ padding: '12px 24px', fontSize: '0.95rem' }}
+              >
+                <Play size={18} />
+                Watch Now
+              </button>
+              <button
+                onClick={() => onHostPartyForMovie(featured)}
+                className="btn btn-secondary"
+                style={{ padding: '12px 20px', fontSize: '0.95rem' }}
               >
                 <Users size={18} />
                 Host Watch Space
               </button>
               <button
-                onClick={() => onSelectMovie(featured)}
+                onClick={() => setDetailsMovie(featured)}
                 className="btn btn-secondary"
-                style={{ padding: '12px 20px', fontSize: '0.95rem' }}
+                style={{ padding: '12px 18px', fontSize: '0.95rem' }}
               >
-                <Play size={18} />
-                Preview Solo
+                <Info size={18} />
+                Details
               </button>
             </div>
           </div>
@@ -134,19 +173,29 @@ export function ContentCatalog({
         </div>
       </div>
 
-      {/* Movie Catalog Grid */}
-      <h3 style={{ fontSize: '1.25rem', marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <Film size={20} color="var(--color-primary)" />
-        Available Licensed Titles ({filteredMovies.length})
-      </h3>
+      {/* Movie Catalog Grid Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+        <h3 style={{ fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Film size={20} color="var(--color-primary)" />
+          Available Cinematic Works ({filteredMovies.length})
+        </h3>
+      </div>
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--color-text-muted)' }}>
-          Loading catalog...
+        <div className="glass-panel" style={{ textAlign: 'center', padding: '60px 0', color: 'var(--color-text-muted)' }}>
+          <div className="spin-icon" style={{ display: 'inline-block', marginBottom: '12px' }}>
+            <Film size={24} color="var(--color-primary)" />
+          </div>
+          <div>Loading movie catalog from API...</div>
+        </div>
+      ) : error ? (
+        <div className="glass-panel" style={{ textAlign: 'center', padding: '48px', color: '#FF5A5F' }}>
+          <div style={{ fontWeight: 600, marginBottom: '6px' }}>Failed to load catalog</div>
+          <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>{error}</div>
         </div>
       ) : filteredMovies.length === 0 ? (
         <div className="glass-panel" style={{ textAlign: 'center', padding: '48px', color: 'var(--color-text-muted)' }}>
-          No content matches your filter criteria.
+          No movies match your filter criteria.
         </div>
       ) : (
         <div style={{
@@ -166,6 +215,7 @@ export function ContentCatalog({
                 transition: 'transform 0.2s, box-shadow 0.2s',
               }}
             >
+              {/* Thumbnail Card Banner */}
               <div style={{
                 position: 'relative',
                 height: '180px',
@@ -178,9 +228,18 @@ export function ContentCatalog({
                   inset: 0,
                   background: 'linear-gradient(180deg, transparent 40%, rgba(20,20,24,0.95) 100%)',
                 }} />
-                <span className="badge badge-primary" style={{ position: 'absolute', top: '12px', left: '12px' }}>
-                  {movie.rating}
-                </span>
+                
+                <div style={{ position: 'absolute', top: '12px', left: '12px', display: 'flex', gap: '6px' }}>
+                  <span className="badge badge-primary">
+                    {movie.rating}
+                  </span>
+                  {movie.featured && (
+                    <span className="badge badge-secondary" style={{ color: '#FFB800' }}>
+                      ★ Featured
+                    </span>
+                  )}
+                </div>
+
                 <span style={{
                   position: 'absolute',
                   bottom: '10px',
@@ -193,12 +252,19 @@ export function ContentCatalog({
                   alignItems: 'center',
                   gap: '4px'
                 }}>
-                  <Clock size={12} /> {Math.floor(movie.duration / 60)}m {movie.duration % 60}s
+                  <Clock size={12} /> {formatDuration(movie.duration)}
                 </span>
               </div>
 
+              {/* Movie Metadata Details */}
               <div style={{ padding: '20px', flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <h4 style={{ fontSize: '1.2rem', marginBottom: '8px' }}>{movie.title}</h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                  <h4 style={{ fontSize: '1.2rem', margin: 0 }}>{movie.title}</h4>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                    {movie.releaseYear}
+                  </span>
+                </div>
+
                 <p style={{
                   fontSize: '0.85rem',
                   color: 'var(--color-text-muted)',
@@ -243,22 +309,34 @@ export function ContentCatalog({
                   </span>
                 </div>
 
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button
-                    onClick={() => onHostPartyForMovie(movie)}
-                    className="btn btn-primary"
-                    style={{ flex: 1, padding: '10px', fontSize: '0.85rem' }}
-                  >
-                    <Users size={14} />
-                    Host Party
-                  </button>
+                {/* Card Action Buttons (Watch, Details, Host Party) */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: '8px' }}>
                   <button
                     onClick={() => onSelectMovie(movie)}
-                    className="btn btn-secondary"
-                    style={{ padding: '10px 14px', fontSize: '0.85rem' }}
+                    className="btn btn-primary"
+                    style={{ padding: '9px 10px', fontSize: '0.82rem' }}
+                    title="Watch Solo Space"
                   >
                     <Play size={14} />
                     Watch
+                  </button>
+                  <button
+                    onClick={() => setDetailsMovie(movie)}
+                    className="btn btn-secondary"
+                    style={{ padding: '9px 10px', fontSize: '0.82rem' }}
+                    title="View Movie Details & Scenes"
+                  >
+                    <Info size={14} />
+                    Details
+                  </button>
+                  <button
+                    onClick={() => onHostPartyForMovie(movie)}
+                    className="btn btn-secondary"
+                    style={{ padding: '9px 10px', fontSize: '0.82rem' }}
+                    title="Host Real-Time Watch Party"
+                  >
+                    <Users size={14} />
+                    Host
                   </button>
                 </div>
               </div>
@@ -291,7 +369,7 @@ export function ContentCatalog({
                   gap: '16px',
                   cursor: 'pointer'
                 }}
-                onClick={() => onHostPartyForMovie(rec.content)}
+                onClick={() => setDetailsMovie(rec.content)}
               >
                 <img
                   src={rec.content.thumbnailUrl}
@@ -313,6 +391,222 @@ export function ContentCatalog({
             ))}
           </div>
         </section>
+      )}
+
+      {/* Modal: Comprehensive Movie Details & Scene Breakdown */}
+      {detailsMovie && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1100,
+          padding: '20px'
+        }}>
+          <div className="glass-panel" style={{
+            maxWidth: '740px',
+            width: '100%',
+            maxHeight: '85vh',
+            display: 'flex',
+            flexDirection: 'column',
+            position: 'relative',
+            overflow: 'hidden',
+            boxShadow: 'var(--shadow-lg)'
+          }}>
+            {/* Header / Hero with Backdrop */}
+            <div style={{
+              position: 'relative',
+              height: '220px',
+              backgroundImage: `linear-gradient(180deg, rgba(11,11,13,0.3) 0%, rgba(11,11,13,0.95) 100%), url(${detailsMovie.thumbnailUrl})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              display: 'flex',
+              alignItems: 'flex-end',
+              padding: '24px'
+            }}>
+              <button
+                onClick={() => setDetailsMovie(null)}
+                style={{
+                  position: 'absolute',
+                  top: '16px',
+                  right: '16px',
+                  background: 'rgba(0,0,0,0.6)',
+                  border: '1px solid var(--color-border-subtle)',
+                  borderRadius: '50%',
+                  width: '36px',
+                  height: '36px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--color-text-bright)',
+                  cursor: 'pointer'
+                }}
+                aria-label="Close details"
+              >
+                <X size={18} />
+              </button>
+
+              <div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
+                  <span className="badge badge-primary">{detailsMovie.rating}</span>
+                  <span className="badge badge-secondary">{detailsMovie.releaseYear}</span>
+                  <span className="badge badge-secondary">{detailsMovie.parentalRating || 'PG-13'}</span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Clock size={12} /> {formatDuration(detailsMovie.duration)}
+                  </span>
+                </div>
+                <h3 style={{ fontSize: '1.8rem', fontWeight: 800, margin: 0 }}>{detailsMovie.title}</h3>
+              </div>
+            </div>
+
+            {/* Scrollable Details Body */}
+            <div style={{ padding: '24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div>
+                <h4 style={{ fontSize: '0.95rem', color: 'var(--color-text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Synopsis & Storyline
+                </h4>
+                <p style={{ color: 'var(--color-text-bright)', fontSize: '0.92rem', lineHeight: 1.6, margin: 0 }}>
+                  {detailsMovie.description}
+                </p>
+              </div>
+
+              {/* Genre Pills */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {(detailsMovie.genre || []).map((g) => (
+                  <span
+                    key={g}
+                    style={{
+                      background: 'var(--color-bg-base)',
+                      border: '1px solid var(--color-border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '4px 10px',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      color: 'var(--color-text-main)',
+                    }}
+                  >
+                    {g}
+                  </span>
+                ))}
+              </div>
+
+              {/* Grounded Scene Breakdown */}
+              {detailsMovie.scenes && detailsMovie.scenes.length > 0 && (
+                <div>
+                  <h4 style={{ fontSize: '0.95rem', color: 'var(--color-text-muted)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <Layers size={16} color="var(--color-primary)" />
+                    Timeline-Grounded Scene RAG Breakdown ({detailsMovie.scenes.length} Scenes)
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {detailsMovie.scenes.map((scene, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          background: 'var(--color-bg-base)',
+                          border: '1px solid var(--color-border-subtle)',
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '12px 14px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                          <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--color-text-bright)' }}>
+                            {scene.title}
+                          </span>
+                          <span style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: '#46D369', background: 'rgba(70,211,105,0.1)', padding: '2px 6px', borderRadius: '4px' }}>
+                            {formatTimestamp(scene.startTime)} - {formatTimestamp(scene.endTime)}
+                          </span>
+                        </div>
+                        <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '0 0 6px 0', lineHeight: 1.4 }}>
+                          {scene.summary}
+                        </p>
+                        {scene.characters && scene.characters.length > 0 && (
+                          <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+                            <strong>Characters: </strong> {scene.characters.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Contextual Trivia Preview */}
+              {detailsMovie.trivia && detailsMovie.trivia.length > 0 && (
+                <div>
+                  <h4 style={{ fontSize: '0.95rem', color: 'var(--color-text-muted)', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <HelpCircle size={16} color="#FFB800" />
+                    Contextual Production Trivia
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {detailsMovie.trivia.slice(0, 2).map((t, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          background: 'rgba(255, 184, 0, 0.05)',
+                          border: '1px solid rgba(255, 184, 0, 0.2)',
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '10px 12px',
+                          fontSize: '0.82rem',
+                          color: 'var(--color-text-main)'
+                        }}
+                      >
+                        <span style={{ fontWeight: 600, color: '#FFB800', marginRight: '6px' }}>
+                          [{t.category}]:
+                        </span>
+                        {t.fact}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Modal Action Controls */}
+            <div style={{
+              borderTop: '1px solid var(--color-border-subtle)',
+              padding: '16px 24px',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '12px',
+              background: 'var(--color-bg-base)'
+            }}>
+              <button
+                onClick={() => setDetailsMovie(null)}
+                className="btn btn-secondary"
+                style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  const m = detailsMovie;
+                  setDetailsMovie(null);
+                  onSelectMovie(m);
+                }}
+                className="btn btn-secondary"
+                style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+              >
+                <Play size={15} />
+                Watch Solo
+              </button>
+              <button
+                onClick={() => {
+                  const m = detailsMovie;
+                  setDetailsMovie(null);
+                  onHostPartyForMovie(m);
+                }}
+                className="btn btn-primary"
+                style={{ padding: '8px 20px', fontSize: '0.85rem' }}
+              >
+                <Users size={15} />
+                Host Watch Space
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
