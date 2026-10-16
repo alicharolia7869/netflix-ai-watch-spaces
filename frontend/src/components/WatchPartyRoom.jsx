@@ -48,10 +48,12 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
   const [aiQuestion, setAiQuestion] = useState('');
   const [aiAnswer, setAiAnswer] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState(null);
 
   // Trivia state
   const [triviaData, setTriviaData] = useState(null);
   const [triviaLoading, setTriviaLoading] = useState(false);
+  const [triviaError, setTriviaError] = useState(null);
 
   // Voting state
   const [votesData, setVotesData] = useState({});
@@ -66,15 +68,23 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
 
   // Host determination
   const isHost = party.partyId === 'solo-space' ||
+    party.partyId?.startsWith('solo-') ||
     party.hostId === user?.id ||
     party.hostId?._id === user?.id ||
     party.hostId === user?._id ||
     (party.participants && party.participants.some(p => (p.userId === user?.id || p.userId === user?._id) && p.role === 'host'));
 
-  // Active scene detection grounded in playback timeline
-  const activeScene = (content.scenes || []).find(
+  // Active scene detection grounded in playback timeline (gap-safe to prevent snapping back to Scene 1)
+  const scenes = content.scenes || [];
+  let activeScene = scenes.find(
     (s) => currentTime >= s.startTime && currentTime <= s.endTime
-  ) || content.scenes?.[0] || null;
+  );
+  if (!activeScene && scenes.length > 0) {
+    activeScene = scenes.filter((s) => s.startTime <= currentTime).pop() ||
+      scenes.reduce((prev, curr) =>
+        Math.abs(curr.startTime - currentTime) < Math.abs(prev.startTime - currentTime) ? curr : prev
+      );
+  }
 
   // Socket setup and real-time event listeners
   useEffect(() => {
@@ -151,11 +161,13 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
         targetTime += elapsed;
       }
 
-      // Drift Correction Threshold (1.5 seconds)
-      const drift = Math.abs(videoRef.current.currentTime - targetTime);
-      if (drift > 1.5) {
-        videoRef.current.currentTime = targetTime;
-        setCurrentTime(targetTime);
+      // Drift Correction Threshold (only apply to guests, preserving authoritative host timeline)
+      if (!isHost) {
+        const drift = Math.abs(videoRef.current.currentTime - targetTime);
+        if (drift > 1.2) {
+          videoRef.current.currentTime = targetTime;
+          setCurrentTime(targetTime);
+        }
       }
 
       if (data.isPlaying && videoRef.current.paused) {
@@ -171,26 +183,32 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
 
     // Live chat messages
     socket.on('chat:message', (newMsg) => {
-      setMessages((prev) => [...prev, newMsg]);
+      setMessages((prev) => {
+        // Prevent duplicate append if message with same _id exists
+        if (newMsg?._id && prev.some((m) => m._id === newMsg._id)) {
+          return prev;
+        }
+        return [...prev, newMsg];
+      });
     });
 
-    // Live emoji reactions
+    // Live emoji reactions (deduplicated against locally dispatched reactions)
     socket.on('reaction:receive', (reactionPayload) => {
       const reactionId = reactionPayload.id || `${Date.now()}-${Math.random()}`;
-      const randomLeft = Math.floor(15 + Math.random() * 70); // 15% to 85% width
-
-      const newReaction = {
-        id: reactionId,
-        emoji: reactionPayload.emoji,
-        left: `${randomLeft}%`,
-        userName: reactionPayload.user?.name || 'Viewer',
-      };
-
-      setReactions((prev) => [...prev.slice(-15), newReaction]);
-
-      setTimeout(() => {
-        setReactions((prev) => prev.filter((r) => r.id !== reactionId));
-      }, 2400);
+      setReactions((prev) => {
+        if (prev.some((r) => r.id === reactionId)) return prev;
+        const randomLeft = Math.floor(15 + Math.random() * 70); // 15% to 85% width
+        const newReaction = {
+          id: reactionId,
+          emoji: reactionPayload.emoji,
+          left: `${randomLeft}%`,
+          userName: reactionPayload.user?.name || 'Viewer',
+        };
+        setTimeout(() => {
+          setReactions((p) => p.filter((r) => r.id !== reactionId));
+        }, 2400);
+        return [...prev.slice(-15), newReaction];
+      });
     });
 
     // Live variation votes
@@ -201,7 +219,15 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
       }));
     });
 
+    // Server-side party notices/errors
+    socket.on('party:error', (err) => {
+      console.warn('📡 Watch Space Notice:', err?.message || 'Server notice');
+    });
+
     return () => {
+      try {
+        socket.emit('party:leave', { partyId: party.partyId });
+      } catch {}
       socket.off('party:state');
       socket.off('party:participants');
       socket.off('party:participant_joined');
@@ -210,8 +236,9 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
       socket.off('chat:message');
       socket.off('reaction:receive');
       socket.off('vote:update');
+      socket.off('party:error');
     };
-  }, [party.partyId, user]);
+  }, [party.partyId, user, isHost]);
 
   // Scroll chat to bottom on new message
   useEffect(() => {
@@ -270,24 +297,47 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
     if (!cleanMsg) return;
 
     const socket = getSocket();
+    const msgId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
     const payload = {
+      _id: msgId,
       partyId: party.partyId,
-      userId: user?.id,
+      userId: user?.id || 'viewer',
       userName: user?.name || 'Viewer',
       userAvatar: user?.avatar || '',
       message: cleanMsg,
       videoTime: currentTime,
+      createdAt: new Date().toISOString(),
+      type: 'chat',
     };
+
+    // If socket is disconnected or this is a solo space, optimistically append to chat
+    if (!socket.connected || party.partyId === 'solo-space' || party.partyId?.startsWith('solo-')) {
+      setMessages((prev) => [...prev, payload]);
+    }
 
     socket.emit('chat:message', payload);
     setChatInput('');
   };
 
-  // Send Live Reaction
+  // Send Live Reaction (instant local display + socket broadcast)
   const handleSendReaction = (emoji) => {
+    const reactionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const randomLeft = Math.floor(15 + Math.random() * 70);
+    const newReaction = {
+      id: reactionId,
+      emoji,
+      left: `${randomLeft}%`,
+      userName: user?.name || 'You',
+    };
+    setReactions((prev) => [...prev.slice(-15), newReaction]);
+    setTimeout(() => {
+      setReactions((prev) => prev.filter((r) => r.id !== reactionId));
+    }, 2400);
+
     const socket = getSocket();
     socket.emit('reaction:send', {
       partyId: party.partyId,
+      id: reactionId,
       emoji,
       user: { id: user?.id, name: user?.name, avatar: user?.avatar },
     });
@@ -306,44 +356,96 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
     }
   };
 
-  // Ask AI Co-Pilot
+  // Ask AI Co-Pilot (with client-side grounded retrieval fallback when backend is offline)
   const handleAskAi = async (customPrompt) => {
     const prompt = customPrompt || aiQuestion;
     if (!prompt.trim()) return;
 
     setAiLoading(true);
+    setAiError(null);
+    const targetContentId = content._id || content.id;
+
     try {
       const res = await askAiCoPilot({
-        contentId: content._id,
+        contentId: targetContentId,
         currentTime,
         question: prompt.trim(),
       });
       setAiAnswer(res);
       setAiQuestion('');
     } catch (err) {
-      console.error('Error asking AI:', err);
+      console.warn('Backend AI API unavailable, engaging client-side scene intelligence:', err.message);
+      if (activeScene) {
+        const timeFormatted = formatTimestamp(currentTime);
+        const range = `${formatTimestamp(activeScene.startTime)} - ${formatTimestamp(activeScene.endTime)}`;
+        let synthesizedAnswer = '';
+        const q = prompt.toLowerCase();
+        if (q.includes('who') || q.includes('character') || q.includes('actor')) {
+          synthesizedAnswer = `In "${activeScene.title}", active characters are ${activeScene.characters?.join(', ') || 'the squad'}. ${activeScene.summary} ${activeScene.context?.[0] || ''}`;
+        } else if (q.includes('dialogue') || q.includes('said') || q.includes('say')) {
+          const dialogueStr = activeScene.keyDialogue?.map((d) => `${d.speaker}: "${d.line}"`).join(' ') || 'The dramatic tension is conveyed atmospherically.';
+          synthesizedAnswer = `In "${activeScene.title}", dialogue: ${dialogueStr}`;
+        } else {
+          synthesizedAnswer = `At ${timeFormatted} in "${activeScene.title}": ${activeScene.summary} Context: ${activeScene.context?.join(' ') || ''}`;
+        }
+
+        setAiAnswer({
+          answer: `${synthesizedAnswer} [Timeline Citation: Scene "${activeScene.title}" (${range})]`,
+          scene: activeScene.title,
+          timeRange: range,
+          characters: activeScene.characters || [],
+          grounded: true,
+          provider: 'offline-scene-retriever',
+        });
+        setAiQuestion('');
+      } else {
+        setAiError(err.message || 'AI Co-Pilot is currently offline. Connect backend to restore live responses.');
+      }
     } finally {
       setAiLoading(false);
     }
   };
 
-  // Fetch Trivia
+  // Fetch Trivia (with embedded catalog fallback when backend is offline)
   const handleFetchTrivia = async () => {
     setTriviaLoading(true);
+    setTriviaError(null);
+    const targetContentId = content._id || content.id;
+
     try {
       const res = await getSceneTrivia({
-        contentId: content._id,
+        contentId: targetContentId,
         currentTime,
       });
       setTriviaData(res);
     } catch (err) {
-      console.error('Error getting trivia:', err);
+      console.warn('Backend trivia unavailable, reading embedded film trivia:', err.message);
+      const allTrivia = content.trivia || [];
+      const sceneTrivia = allTrivia.filter((t) => activeScene && t.sceneId === activeScene.sceneId);
+      const candidates = sceneTrivia.length > 0 ? sceneTrivia : allTrivia;
+
+      if (candidates.length > 0) {
+        const picked = candidates[Math.floor(Math.random() * candidates.length)];
+        setTriviaData({
+          fact: picked.fact,
+          category: picked.category || 'Behind the Scenes',
+          scene: activeScene ? activeScene.title : 'General',
+          timestamp: formatTimestamp(currentTime),
+        });
+      } else {
+        setTriviaData({
+          fact: `"${content.title || 'This film'}" was created as an open-format creative benchmark showcasing cutting-edge visual artistry.`,
+          category: 'Behind the Scenes',
+          scene: activeScene ? activeScene.title : 'General',
+          timestamp: formatTimestamp(currentTime),
+        });
+      }
     } finally {
       setTriviaLoading(false);
     }
   };
 
-  // Cast Vote
+  // Cast Vote (optimistic UI update)
   const handleVote = (variationId, optionId) => {
     const socket = getSocket();
     socket.emit('vote:cast', {
@@ -353,6 +455,29 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
       user: { id: user?.id, name: user?.name },
     });
     setUserVotedOptions((prev) => ({ ...prev, [variationId]: optionId }));
+    setVotesData((prev) => {
+      const current = prev[variationId] || { total: 0, options: {} };
+      const currentOptCount = current.options[optionId] || 0;
+      return {
+        ...prev,
+        [variationId]: {
+          total: current.total + 1,
+          options: {
+            ...current.options,
+            [optionId]: currentOptCount + 1,
+          },
+        },
+      };
+    });
+  };
+
+  // Leave Watch Space
+  const handleLeave = () => {
+    try {
+      const socket = getSocket();
+      socket.emit('party:leave', { partyId: party.partyId });
+    } catch {}
+    if (onLeaveParty) onLeaveParty();
   };
 
   // Copy party code
@@ -457,7 +582,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
           </button>
 
           <button
-            onClick={onLeaveParty}
+            onClick={handleLeave}
             className="btn btn-secondary"
             style={{ padding: '8px 14px', fontSize: '0.8rem', color: '#FF5A5F' }}
           >
@@ -468,23 +593,23 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
       </div>
 
       {/* Main Streaming & Social Layout */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1fr) 380px',
-        gap: '24px',
-        alignItems: 'start'
-      }}>
+      <div className="watch-room-grid">
         {/* Left Column: Synchronized Video Stream */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div style={{
-            position: 'relative',
-            background: '#000',
-            borderRadius: 'var(--radius-md)',
-            overflow: 'hidden',
-            aspectRatio: '16/9',
-            boxShadow: 'var(--shadow-lg)',
-            border: '1px solid var(--color-border-subtle)'
-          }}>
+          <div
+            onClick={togglePlayPause}
+            style={{
+              position: 'relative',
+              background: '#000',
+              borderRadius: 'var(--radius-md)',
+              overflow: 'hidden',
+              aspectRatio: '16/9',
+              boxShadow: 'var(--shadow-lg)',
+              border: '1px solid var(--color-border-subtle)',
+              cursor: isHost ? 'pointer' : 'default'
+            }}
+            title={isHost ? (isPlaying ? 'Click to Pause' : 'Click to Play') : 'Host controls video playback'}
+          >
             <video
               ref={videoRef}
               src={content.videoUrl}
@@ -941,6 +1066,18 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
                     {aiAnswer.answer}
                   </div>
                 </div>
+              ) : aiError ? (
+                <div style={{
+                  background: 'rgba(229, 9, 20, 0.1)',
+                  border: '1px solid rgba(229, 9, 20, 0.3)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '12px',
+                  color: '#FF5A5F',
+                  fontSize: '0.82rem',
+                  marginBottom: '16px'
+                }}>
+                  {aiError}
+                </div>
               ) : null}
 
               {/* Custom Question Form */}
@@ -955,7 +1092,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
                     flex: 1,
                     padding: '8px 12px',
                     borderRadius: 'var(--radius-sm)',
-                    background: 'var(--color-bg-base)',
+                    background: 'var(--color-bg-surface)',
                     border: '1px solid var(--color-border-subtle)',
                     color: 'var(--color-text-bright)',
                     fontSize: '0.85rem'
@@ -997,6 +1134,19 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
                   </div>
                 )}
               </div>
+
+              {triviaError && (
+                <div style={{
+                  background: 'rgba(229, 9, 20, 0.1)',
+                  border: '1px solid rgba(229, 9, 20, 0.3)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '10px',
+                  color: '#FF5A5F',
+                  fontSize: '0.8rem'
+                }}>
+                  {triviaError}
+                </div>
+              )}
 
               <button
                 onClick={handleFetchTrivia}

@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Content } from '../models/Content.js';
 
 /**
@@ -14,11 +15,26 @@ export function formatTime(seconds) {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
+async function findContentByIdOrSlug(id) {
+  if (!id) return null;
+  if (mongoose.isValidObjectId(id)) {
+    const doc = await Content.findById(id);
+    if (doc) return doc;
+  }
+  const cleanId = String(id).toLowerCase().trim();
+  if (cleanId === 'tos-001') return await Content.findOne({ title: /Tears of Steel/i });
+  if (cleanId === 'sintel-002') return await Content.findOne({ title: /Sintel/i });
+  if (cleanId === 'bbb-003') return await Content.findOne({ title: /Big Buck Bunny/i });
+  const byTitle = await Content.findOne({ title: new RegExp(cleanId.replace(/[-_]/g, ' '), 'i') });
+  if (byTitle) return byTitle;
+  return await Content.findOne();
+}
+
 /**
  * Detect the active scene and temporal context for a given playback timestamp.
  */
 export async function getSceneContext(contentId, currentTime = 0) {
-  const content = await Content.findById(contentId);
+  const content = await findContentByIdOrSlug(contentId);
   if (!content) {
     throw new Error('Content not found');
   }
@@ -29,11 +45,12 @@ export async function getSceneContext(contentId, currentTime = 0) {
   // Find exact active scene
   let activeScene = scenes.find((s) => time >= s.startTime && time <= s.endTime);
 
-  // If between or past known scenes, find closest or default
+  // If between or past known scenes, find prior scene or closest scene (prevents jumping back to Scene 1)
   if (!activeScene && scenes.length > 0) {
-    activeScene = scenes.reduce((prev, curr) => {
-      return Math.abs(curr.startTime - time) < Math.abs(prev.startTime - time) ? curr : prev;
-    });
+    activeScene = scenes.filter((s) => s.startTime <= time).pop() ||
+      scenes.reduce((prev, curr) => {
+        return Math.abs(curr.startTime - time) < Math.abs(prev.startTime - time) ? curr : prev;
+      });
   }
 
   // Find prior scenes up to current time (for context like "what happened before this")

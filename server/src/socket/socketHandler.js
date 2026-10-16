@@ -69,6 +69,41 @@ export function setupSocketIO(io) {
       currentPartyId = normalizedPartyId;
       currentUser = user || { name: 'Guest', id: socket.id };
 
+      // Resilient support for Solo Watch Spaces without requiring database party creation
+      if (normalizedPartyId.startsWith('solo-') || normalizedPartyId === 'solo-space') {
+        const soloRoomId = `${normalizedPartyId}-${socket.id}`;
+        socket.join(soloRoomId);
+        currentPartyId = soloRoomId;
+
+        const participantRecord = {
+          socketId: socket.id,
+          userId: user?.id || socket.id,
+          name: user?.name || 'Solo Viewer',
+          avatar: user?.avatar || '',
+          role: 'host',
+          isOnline: true,
+          joinedAt: new Date().toISOString(),
+        };
+
+        socket.emit('party:state', {
+          party: {
+            partyId: normalizedPartyId,
+            title: 'Solo Watch Space',
+            status: 'active',
+            hostId: user?.id || socket.id,
+          },
+          playback: {
+            currentTime: 0,
+            isPlaying: false,
+            updatedAt: Date.now(),
+            serverTimestamp: Date.now(),
+          },
+          messages: [],
+          participants: [participantRecord],
+        });
+        return;
+      }
+
       socket.join(normalizedPartyId);
 
       try {
@@ -164,7 +199,7 @@ export function setupSocketIO(io) {
       const memState = partyPlaybackMemory.get(pId) || { hostId: null };
 
       // Host control validation
-      const isHost = !memState.hostId || memState.hostId === (currentUser?.id || '').toString() || pId === 'solo-space';
+      const isHost = !memState.hostId || memState.hostId === (currentUser?.id || '').toString() || pId === 'solo-space' || pId.startsWith('solo-');
       if (!isHost) {
         socket.emit('party:error', { message: 'Only the party host can control video playback.' });
         return;
@@ -182,16 +217,18 @@ export function setupSocketIO(io) {
         serverTimestamp: Date.now(),
       });
 
-      WatchParty.updateOne(
-        { partyId: pId },
-        {
-          $set: {
-            'playback.currentTime': memState.currentTime,
-            'playback.isPlaying': true,
-            'playback.updatedAt': memState.updatedAt,
-          },
-        }
-      ).catch(() => {});
+      if (!pId.startsWith('solo-') && pId !== 'solo-space') {
+        WatchParty.updateOne(
+          { partyId: pId },
+          {
+            $set: {
+              'playback.currentTime': memState.currentTime,
+              'playback.isPlaying': true,
+              'playback.updatedAt': memState.updatedAt,
+            },
+          }
+        ).catch(() => {});
+      }
     });
 
     // 3. Playback: Pause (Host Authorized)
@@ -202,7 +239,7 @@ export function setupSocketIO(io) {
       const memState = partyPlaybackMemory.get(pId) || { hostId: null };
 
       // Host control validation
-      const isHost = !memState.hostId || memState.hostId === (currentUser?.id || '').toString() || pId === 'solo-space';
+      const isHost = !memState.hostId || memState.hostId === (currentUser?.id || '').toString() || pId === 'solo-space' || pId.startsWith('solo-');
       if (!isHost) {
         socket.emit('party:error', { message: 'Only the party host can control video playback.' });
         return;
@@ -220,16 +257,18 @@ export function setupSocketIO(io) {
         serverTimestamp: Date.now(),
       });
 
-      WatchParty.updateOne(
-        { partyId: pId },
-        {
-          $set: {
-            'playback.currentTime': memState.currentTime,
-            'playback.isPlaying': false,
-            'playback.updatedAt': memState.updatedAt,
-          },
-        }
-      ).catch(() => {});
+      if (!pId.startsWith('solo-') && pId !== 'solo-space') {
+        WatchParty.updateOne(
+          { partyId: pId },
+          {
+            $set: {
+              'playback.currentTime': memState.currentTime,
+              'playback.isPlaying': false,
+              'playback.updatedAt': memState.updatedAt,
+            },
+          }
+        ).catch(() => {});
+      }
     });
 
     // 4. Playback: Seek (Host Authorized)
@@ -240,7 +279,7 @@ export function setupSocketIO(io) {
       const memState = partyPlaybackMemory.get(pId) || { hostId: null };
 
       // Host control validation
-      const isHost = !memState.hostId || memState.hostId === (currentUser?.id || '').toString() || pId === 'solo-space';
+      const isHost = !memState.hostId || memState.hostId === (currentUser?.id || '').toString() || pId === 'solo-space' || pId.startsWith('solo-');
       if (!isHost) {
         socket.emit('party:error', { message: 'Only the party host can control video playback.' });
         return;
@@ -268,6 +307,21 @@ export function setupSocketIO(io) {
       sanitizedMessage = sanitizedMessage.replace(/[<>]/g, '');
       if (!sanitizedMessage) return;
 
+      if (pId.startsWith('solo-') || pId === 'solo-space') {
+        socket.emit('chat:message', {
+          _id: `msg-${Date.now()}`,
+          partyId: pId,
+          userId: data.userId || currentUser?.id,
+          userName: data.userName || currentUser?.name || 'Viewer',
+          userAvatar: data.userAvatar || currentUser?.avatar || '',
+          message: sanitizedMessage,
+          videoTime: Number(data.videoTime) || 0,
+          createdAt: new Date().toISOString(),
+          type: data.type || 'chat',
+        });
+        return;
+      }
+
       try {
         const savedMessage = await ChatMessage.create({
           partyId: pId,
@@ -286,12 +340,12 @@ export function setupSocketIO(io) {
     });
 
     // 6. Real-Time Emoji Reaction Dispatch
-    socket.on('reaction:send', ({ partyId, emoji, user }) => {
+    socket.on('reaction:send', ({ partyId, emoji, user, id }) => {
       const pId = (partyId || currentPartyId)?.toLowerCase();
       if (!pId || !emoji) return;
 
       const reactionPayload = {
-        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: id || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         emoji: String(emoji).slice(0, 10),
         user: user || currentUser || { name: 'Viewer' },
         timestamp: Date.now(),

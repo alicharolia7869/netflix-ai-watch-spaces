@@ -224,3 +224,47 @@ test('GET /api/recommendations returns scored content suggestions', async () => 
   assert.ok(data.items.length > 0);
   assert.ok(data.items[0].score > 0);
 });
+
+test('GET /api/content/:slug safely resolves non-ObjectId slugs without CastError', async () => {
+  const res = await fetch(`${baseUrl}/api/content/tos-001`);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.title, 'Tears of Steel');
+});
+
+test('POST /api/parties accepts slug-based contentId without CastError', async () => {
+  const res = await fetch(`${baseUrl}/api/parties`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify({
+      contentId: 'tos-001',
+      title: 'Tears of Steel Slug Test Party',
+    }),
+  });
+
+  assert.equal(res.status, 201);
+  const data = await res.json();
+  assert.ok(data.partyId.startsWith('wp-'));
+  assert.equal(data.contentId.title, 'Tears of Steel');
+});
+
+test('POST /api/ai/ask accepts slug-based contentId without CastError', async () => {
+  const res = await fetch(`${baseUrl}/api/ai/ask`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contentId: 'tos-001',
+      currentTime: 100,
+      question: 'What happened?',
+    }),
+  });
+
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.ok(data.answer);
+  assert.equal(data.grounded, true);
+});
+

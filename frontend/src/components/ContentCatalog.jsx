@@ -181,6 +181,24 @@ export function ContentCatalog({
         </h3>
       </div>
 
+      {error && filteredMovies.length > 0 && (
+        <div style={{
+          background: 'rgba(255, 184, 0, 0.08)',
+          border: '1px solid rgba(255, 184, 0, 0.25)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '10px 16px',
+          color: 'var(--color-warning)',
+          fontSize: '0.85rem',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <Info size={16} />
+          <span>Displaying verified offline catalog. Connect backend to synchronize real-time updates.</span>
+        </div>
+      )}
+
       {loading ? (
         <div className="glass-panel" style={{ textAlign: 'center', padding: '60px 0', color: 'var(--color-text-muted)' }}>
           <div className="spin-icon" style={{ display: 'inline-block', marginBottom: '12px' }}>
@@ -188,7 +206,7 @@ export function ContentCatalog({
           </div>
           <div>Loading movie catalog from API...</div>
         </div>
-      ) : error ? (
+      ) : (error && filteredMovies.length === 0) ? (
         <div className="glass-panel" style={{ textAlign: 'center', padding: '48px', color: '#FF5A5F' }}>
           <div style={{ fontWeight: 600, marginBottom: '6px' }}>Failed to load catalog</div>
           <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>{error}</div>

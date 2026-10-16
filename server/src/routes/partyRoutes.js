@@ -1,5 +1,6 @@
 import express from 'express';
 import crypto from 'crypto';
+import mongoose from 'mongoose';
 import { WatchParty } from '../models/WatchParty.js';
 import { Content } from '../models/Content.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -10,6 +11,19 @@ function generatePartyId() {
   return `wp-${crypto.randomBytes(3).toString('hex')}`;
 }
 
+async function findContentByIdOrSlug(id) {
+  if (!id) return null;
+  if (mongoose.isValidObjectId(id)) {
+    const doc = await Content.findById(id);
+    if (doc) return doc;
+  }
+  const cleanId = String(id).toLowerCase().trim();
+  if (cleanId === 'tos-001') return await Content.findOne({ title: /Tears of Steel/i });
+  if (cleanId === 'sintel-002') return await Content.findOne({ title: /Sintel/i });
+  if (cleanId === 'bbb-003') return await Content.findOne({ title: /Big Buck Bunny/i });
+  return await Content.findOne({ title: new RegExp(cleanId.replace(/[-_]/g, ' '), 'i') });
+}
+
 // POST /api/parties - Create Party
 router.post('/', requireAuth, async (req, res) => {
   try {
@@ -18,7 +32,7 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ message: 'contentId is required to start a watch party.' });
     }
 
-    const content = await Content.findById(contentId);
+    const content = await findContentByIdOrSlug(contentId);
     if (!content) {
       return res.status(404).json({ message: 'Selected content does not exist.' });
     }
@@ -32,7 +46,7 @@ router.post('/', requireAuth, async (req, res) => {
     const party = await WatchParty.create({
       partyId,
       hostId: req.user._id,
-      contentId,
+      contentId: content._id,
       title: title || `${content.title} Watch Party`,
       playback: {
         currentTime: 0,

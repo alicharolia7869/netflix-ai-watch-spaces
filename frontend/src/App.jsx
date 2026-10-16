@@ -125,10 +125,14 @@ function App() {
       const contentId = path.replace('/watch/', '').trim();
       if (contentId) {
         try {
-          const movie = await getContentDetails(contentId);
+          let movie = (catalog || []).find((c) => (c._id || c.id) === contentId);
+          if (!movie) {
+            movie = await getContentDetails(contentId);
+          }
           if (movie) {
+            const soloRoomId = `solo-${movie._id || movie.id || 'film'}`;
             setActiveParty({
-              partyId: 'solo-space',
+              partyId: soloRoomId,
               contentId: movie,
               title: `${movie.title} Solo Space`,
               hostId: user?.id || 'viewer',
@@ -152,7 +156,7 @@ function App() {
 
     // Default to catalog for '/', '/catalog', '/movies'
     setCurrentView('catalog');
-  }, [user]);
+  }, [user, catalog]);
 
   // Listen to browser popstate (back/forward)
   useEffect(() => {
@@ -434,16 +438,17 @@ function App() {
             loading={catalogLoading}
             error={catalogError}
             onSelectMovie={(movie) => {
-              // Quick solo watch space
+              // Quick solo watch space with isolated partyId
+              const soloRoomId = `solo-${movie._id || movie.id || 'film'}`;
               setActiveParty({
-                partyId: 'solo-space',
+                partyId: soloRoomId,
                 contentId: movie,
                 title: `${movie.title} Solo Space`,
                 hostId: user?.id || 'viewer',
                 participants: [{ name: user?.name || 'Solo Viewer', role: 'host' }],
               });
               setCurrentView('watch_space');
-              navigateTo(`/watch/${movie._id}`);
+              navigateTo(`/watch/${movie._id || movie.id}`);
             }}
             onHostPartyForMovie={() => setHostModalOpen(true)}
           />

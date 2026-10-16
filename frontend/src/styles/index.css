@@ -221,3 +221,18 @@ button {
   animation: floatUpFade 2.4s ease-out forwards;
   filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.7));
 }
+
+/* Watch Space Responsive Layout */
+.watch-room-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .watch-room-grid {
+    grid-template-columns: 1fr;
+  }
+}
+

@@ -1,7 +1,21 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { Content } from '../models/Content.js';
 
 const router = express.Router();
+
+async function findContentByIdOrSlug(id) {
+  if (!id) return null;
+  if (mongoose.isValidObjectId(id)) {
+    const doc = await Content.findById(id);
+    if (doc) return doc;
+  }
+  const cleanId = String(id).toLowerCase().trim();
+  if (cleanId === 'tos-001') return await Content.findOne({ title: /Tears of Steel/i });
+  if (cleanId === 'sintel-002') return await Content.findOne({ title: /Sintel/i });
+  if (cleanId === 'bbb-003') return await Content.findOne({ title: /Big Buck Bunny/i });
+  return await Content.findOne({ title: new RegExp(cleanId.replace(/[-_]/g, ' '), 'i') });
+}
 
 // GET /api/content
 router.get('/', async (req, res) => {
@@ -35,7 +49,7 @@ router.get('/', async (req, res) => {
 // GET /api/content/:id
 router.get('/:id', async (req, res) => {
   try {
-    const item = await Content.findById(req.params.id);
+    const item = await findContentByIdOrSlug(req.params.id);
     if (!item) {
       return res.status(404).json({ message: 'Content item not found.' });
     }
@@ -48,7 +62,7 @@ router.get('/:id', async (req, res) => {
 // GET /api/content/:id/scenes
 router.get('/:id/scenes', async (req, res) => {
   try {
-    const item = await Content.findById(req.params.id).select('scenes title duration');
+    const item = await findContentByIdOrSlug(req.params.id);
     if (!item) {
       return res.status(404).json({ message: 'Content item not found.' });
     }
