@@ -4,6 +4,10 @@ import { Content } from '../models/Content.js';
 
 const router = express.Router();
 
+function escapeRegex(str) {
+  return String(str).replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+}
+
 async function findContentByIdOrSlug(id) {
   if (!id) return null;
   if (mongoose.isValidObjectId(id)) {
@@ -14,7 +18,8 @@ async function findContentByIdOrSlug(id) {
   if (cleanId === 'tos-001') return await Content.findOne({ title: /Tears of Steel/i });
   if (cleanId === 'sintel-002') return await Content.findOne({ title: /Sintel/i });
   if (cleanId === 'bbb-003') return await Content.findOne({ title: /Big Buck Bunny/i });
-  return await Content.findOne({ title: new RegExp(cleanId.replace(/[-_]/g, ' '), 'i') });
+  const escaped = escapeRegex(cleanId.replace(/[-_]/g, ' '));
+  return await Content.findOne({ title: new RegExp(escaped, 'i') });
 }
 
 // GET /api/content
@@ -32,9 +37,10 @@ router.get('/', async (req, res) => {
     }
 
     if (search) {
+      const escaped = escapeRegex(search);
       query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
+        { title: { $regex: escaped, $options: 'i' } },
+        { description: { $regex: escaped, $options: 'i' } },
       ];
     }
 

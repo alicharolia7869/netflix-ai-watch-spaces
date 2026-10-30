@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { WatchParty } from '../models/WatchParty.js';
 import { ChatMessage } from '../models/ChatMessage.js';
 import { Vote } from '../models/Vote.js';
@@ -45,7 +46,7 @@ export function setupSocketIO(io) {
         }
       }
 
-      if (currentUser?.id) {
+      if (currentUser?.id && mongoose.isValidObjectId(currentUser.id)) {
         WatchParty.updateOne(
           { partyId: pId, 'participants.userId': currentUser.id },
           { $set: { 'participants.$.isOnline': false } }
@@ -73,6 +74,7 @@ export function setupSocketIO(io) {
       if (normalizedPartyId.startsWith('solo-') || normalizedPartyId === 'solo-space') {
         const soloRoomId = `${normalizedPartyId}-${socket.id}`;
         socket.join(soloRoomId);
+        socket.join(normalizedPartyId);
         currentPartyId = soloRoomId;
 
         const participantRecord = {
@@ -152,7 +154,7 @@ export function setupSocketIO(io) {
         roomParticipants.get(normalizedPartyId).set(socket.id, participantRecord);
 
         // Update online status in database
-        if (user && user.id) {
+        if (user?.id && mongoose.isValidObjectId(user.id)) {
           await WatchParty.updateOne(
             { partyId: normalizedPartyId, 'participants.userId': user.id },
             { $set: { 'participants.$.isOnline': true } }
@@ -309,14 +311,14 @@ export function setupSocketIO(io) {
 
       if (pId.startsWith('solo-') || pId === 'solo-space') {
         socket.emit('chat:message', {
-          _id: `msg-${Date.now()}`,
+          _id: data._id || `msg-${Date.now()}`,
           partyId: pId,
           userId: data.userId || currentUser?.id,
           userName: data.userName || currentUser?.name || 'Viewer',
           userAvatar: data.userAvatar || currentUser?.avatar || '',
           message: sanitizedMessage,
           videoTime: Number(data.videoTime) || 0,
-          createdAt: new Date().toISOString(),
+          createdAt: data.createdAt || new Date().toISOString(),
           type: data.type || 'chat',
         });
         return;

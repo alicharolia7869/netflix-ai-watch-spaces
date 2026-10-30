@@ -23,6 +23,7 @@ router.get('/:partyId/messages', async (req, res) => {
 // POST /api/parties/:partyId/messages
 router.post('/:partyId/messages', requireAuth, async (req, res) => {
   try {
+    const { message, videoTime, type } = req.body || {};
     let sanitizedMessage = String(message || '').trim().slice(0, 500);
     sanitizedMessage = sanitizedMessage.replace(/[<>]/g, '');
     if (!sanitizedMessage) {

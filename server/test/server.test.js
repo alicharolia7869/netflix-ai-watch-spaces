@@ -268,3 +268,58 @@ test('POST /api/ai/ask accepts slug-based contentId without CastError', async ()
   assert.equal(data.grounded, true);
 });
 
+test('POST /api/parties/:partyId/messages sends message and GET returns messages', async () => {
+  const res = await fetch(`${baseUrl}/api/parties/${createdPartyId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify({
+      message: 'Awesome visual effects in this scene!',
+      videoTime: 125,
+      type: 'chat',
+    }),
+  });
+
+  assert.equal(res.status, 201);
+  const data = await res.json();
+  assert.equal(data.message, 'Awesome visual effects in this scene!');
+  assert.equal(data.videoTime, 125);
+  assert.equal(data.partyId, createdPartyId);
+
+  const getRes = await fetch(`${baseUrl}/api/parties/${createdPartyId}/messages`);
+  assert.equal(getRes.status, 200);
+  const getData = await getRes.json();
+  assert.ok(Array.isArray(getData.messages));
+  assert.ok(getData.messages.some((m) => m.message === 'Awesome visual effects in this scene!'));
+});
+
+test('GET /api/content?search handles regex special characters safely without 500 error', async () => {
+  const res = await fetch(`${baseUrl}/api/content?search=Steel+(2024)[test]`);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.ok(Array.isArray(data.items));
+});
+
+test('POST /api/parties/:partyId/leave and DELETE /api/parties/:partyId work cleanly', async () => {
+  const leaveRes = await fetch(`${baseUrl}/api/parties/${createdPartyId}/leave`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${authToken}`,
+    },
+  });
+  assert.equal(leaveRes.status, 200);
+
+  const endRes = await fetch(`${baseUrl}/api/parties/${createdPartyId}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${authToken}`,
+    },
+  });
+  assert.equal(endRes.status, 200);
+  const endData = await endRes.json();
+  assert.equal(endData.message, 'Watch party ended successfully.');
+});
+

@@ -42,6 +42,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [hostModalOpen, setHostModalOpen] = useState(false);
+  const [selectedMovieForHost, setSelectedMovieForHost] = useState(null);
   const [backendModalOpen, setBackendModalOpen] = useState(false);
 
   // Content & Recommendations initialized with default catalog for instantaneous display
@@ -450,7 +451,10 @@ function App() {
               setCurrentView('watch_space');
               navigateTo(`/watch/${movie._id || movie.id}`);
             }}
-            onHostPartyForMovie={() => setHostModalOpen(true)}
+            onHostPartyForMovie={(movie) => {
+              setSelectedMovieForHost(movie);
+              setHostModalOpen(true);
+            }}
           />
         )}
 
@@ -728,9 +732,13 @@ function App() {
 
       <HostPartyModal
         isOpen={hostModalOpen}
-        onClose={() => setHostModalOpen(false)}
+        onClose={() => {
+          setHostModalOpen(false);
+          setSelectedMovieForHost(null);
+        }}
         catalog={catalog}
         user={user}
+        initialContentId={selectedMovieForHost?._id || selectedMovieForHost?.id}
         onPartyJoined={handlePartyJoined}
         onOpenAuth={() => setAuthModalOpen(true)}
       />

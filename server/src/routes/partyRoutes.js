@@ -11,6 +11,10 @@ function generatePartyId() {
   return `wp-${crypto.randomBytes(3).toString('hex')}`;
 }
 
+function escapeRegex(str) {
+  return String(str).replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+}
+
 async function findContentByIdOrSlug(id) {
   if (!id) return null;
   if (mongoose.isValidObjectId(id)) {
@@ -21,7 +25,8 @@ async function findContentByIdOrSlug(id) {
   if (cleanId === 'tos-001') return await Content.findOne({ title: /Tears of Steel/i });
   if (cleanId === 'sintel-002') return await Content.findOne({ title: /Sintel/i });
   if (cleanId === 'bbb-003') return await Content.findOne({ title: /Big Buck Bunny/i });
-  return await Content.findOne({ title: new RegExp(cleanId.replace(/[-_]/g, ' '), 'i') });
+  const escaped = escapeRegex(cleanId.replace(/[-_]/g, ' '));
+  return await Content.findOne({ title: new RegExp(escaped, 'i') });
 }
 
 // POST /api/parties - Create Party
@@ -165,6 +170,14 @@ router.delete('/:partyId', requireAuth, async (req, res) => {
 
     party.status = 'ended';
     await party.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(req.params.partyId.toLowerCase()).emit('party:ended', {
+        partyId: req.params.partyId.toLowerCase(),
+        message: 'The host has ended this watch space.',
+      });
+    }
 
     return res.json({ message: 'Watch party ended successfully.' });
   } catch (err) {

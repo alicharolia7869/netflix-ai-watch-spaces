@@ -2,13 +2,19 @@ import React, { useState } from 'react';
 import { X, PlaySquare, Users, Sparkles, CheckCircle2, Film } from 'lucide-react';
 import { createWatchParty, joinWatchParty } from '../services/api';
 
-export function HostPartyModal({ isOpen, onClose, catalog = [], user, onPartyJoined, onOpenAuth }) {
+export function HostPartyModal({ isOpen, onClose, catalog = [], user, initialContentId, onPartyJoined, onOpenAuth }) {
   const [activeTab, setActiveTab] = useState('host'); // 'host' | 'join'
-  const [selectedContentId, setSelectedContentId] = useState('');
+  const [selectedContentId, setSelectedContentId] = useState(initialContentId || '');
+  const [prevInitialId, setPrevInitialId] = useState(initialContentId);
   const [partyTitle, setPartyTitle] = useState('');
   const [joinPartyCode, setJoinPartyCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  if (initialContentId !== prevInitialId) {
+    setPrevInitialId(initialContentId);
+    setSelectedContentId(initialContentId || (catalog[0]?._id || catalog[0]?.id || ''));
+  }
 
   if (!isOpen) return null;
 
@@ -22,8 +28,9 @@ export function HostPartyModal({ isOpen, onClose, catalog = [], user, onPartyJoi
     setLoading(true);
     setError(null);
     try {
+      const targetContentId = selectedContentId || initialContentId || catalog[0]?._id || catalog[0]?.id;
       const party = await createWatchParty({
-        contentId: selectedContentId || catalog[0]?._id,
+        contentId: targetContentId,
         title: partyTitle.trim() || undefined,
       });
       onPartyJoined(party);
@@ -192,11 +199,13 @@ export function HostPartyModal({ isOpen, onClose, catalog = [], user, onPartyJoi
               </label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto' }}>
                 {catalog.map((movie) => {
-                  const isSelected = (selectedContentId || catalog[0]?._id) === movie._id;
+                  const movieId = movie._id || movie.id;
+                  const currentSelected = selectedContentId || initialContentId || catalog[0]?._id || catalog[0]?.id;
+                  const isSelected = currentSelected === movieId;
                   return (
                     <div
-                      key={movie._id}
-                      onClick={() => setSelectedContentId(movie._id)}
+                      key={movieId}
+                      onClick={() => setSelectedContentId(movieId)}
                       style={{
                         display: 'flex',
                         alignItems: 'center',

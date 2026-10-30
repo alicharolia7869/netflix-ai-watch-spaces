@@ -25,6 +25,19 @@ function formatTimestamp(seconds) {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
+function generateId(prefix = 'id') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function getRandomItem(arr) {
+  if (!arr || arr.length === 0) return null;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function getRandomReactionOffset() {
+  return Math.floor(15 + Math.random() * 70);
+}
+
 const EMOJI_REACTIONS = ['❤️', '🔥', '👏', '🍿', '😱', '😂'];
 
 export function WatchPartyRoom({ party, user, onLeaveParty }) {
@@ -32,6 +45,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   // Participants roster
   const [participants, setParticipants] = useState(party.participants || []);
@@ -90,10 +104,20 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
   useEffect(() => {
     const socket = getSocket();
 
-    socket.emit('party:join', {
+    const joinPayload = {
       partyId: party.partyId,
-      user: { id: user?.id, name: user?.name, avatar: user?.avatar },
-    });
+      user: { id: user?.id || user?._id, name: user?.name, avatar: user?.avatar },
+    };
+
+    const handleConnect = () => {
+      socket.emit('party:join', joinPayload);
+    };
+
+    // Join room initially or upon reconnect
+    if (socket.connected) {
+      handleConnect();
+    }
+    socket.on('connect', handleConnect);
 
     // Initial state upon joining
     socket.on('party:state', (data) => {
@@ -164,7 +188,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
       // Drift Correction Threshold (only apply to guests, preserving authoritative host timeline)
       if (!isHost) {
         const drift = Math.abs(videoRef.current.currentTime - targetTime);
-        if (drift > 1.2) {
+        if (!data.isPlaying || drift > 1.0) {
           videoRef.current.currentTime = targetTime;
           setCurrentTime(targetTime);
         }
@@ -194,10 +218,10 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
 
     // Live emoji reactions (deduplicated against locally dispatched reactions)
     socket.on('reaction:receive', (reactionPayload) => {
-      const reactionId = reactionPayload.id || `${Date.now()}-${Math.random()}`;
+      const reactionId = reactionPayload.id || generateId('rx');
       setReactions((prev) => {
         if (prev.some((r) => r.id === reactionId)) return prev;
-        const randomLeft = Math.floor(15 + Math.random() * 70); // 15% to 85% width
+        const randomLeft = getRandomReactionOffset(); // 15% to 85% width
         const newReaction = {
           id: reactionId,
           emoji: reactionPayload.emoji,
@@ -219,6 +243,14 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
       }));
     });
 
+    // Room terminated by host
+    socket.on('party:ended', (info) => {
+      setParticipantNotification(info?.message || 'This watch space has ended.');
+      setTimeout(() => {
+        if (onLeaveParty) onLeaveParty();
+      }, 2500);
+    });
+
     // Server-side party notices/errors
     socket.on('party:error', (err) => {
       console.warn('📡 Watch Space Notice:', err?.message || 'Server notice');
@@ -228,6 +260,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
       try {
         socket.emit('party:leave', { partyId: party.partyId });
       } catch {}
+      socket.off('connect', handleConnect);
       socket.off('party:state');
       socket.off('party:participants');
       socket.off('party:participant_joined');
@@ -236,9 +269,10 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
       socket.off('chat:message');
       socket.off('reaction:receive');
       socket.off('vote:update');
+      socket.off('party:ended');
       socket.off('party:error');
     };
-  }, [party.partyId, user, isHost]);
+  }, [party.partyId, user, isHost, onLeaveParty]);
 
   // Scroll chat to bottom on new message
   useEffect(() => {
@@ -297,11 +331,11 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
     if (!cleanMsg) return;
 
     const socket = getSocket();
-    const msgId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    const msgId = generateId('msg');
     const payload = {
       _id: msgId,
       partyId: party.partyId,
-      userId: user?.id || 'viewer',
+      userId: user?.id || user?._id || 'viewer',
       userName: user?.name || 'Viewer',
       userAvatar: user?.avatar || '',
       message: cleanMsg,
@@ -321,8 +355,8 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
 
   // Send Live Reaction (instant local display + socket broadcast)
   const handleSendReaction = (emoji) => {
-    const reactionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const randomLeft = Math.floor(15 + Math.random() * 70);
+    const reactionId = generateId('rx');
+    const randomLeft = getRandomReactionOffset();
     const newReaction = {
       id: reactionId,
       emoji,
@@ -339,7 +373,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
       partyId: party.partyId,
       id: reactionId,
       emoji,
-      user: { id: user?.id, name: user?.name, avatar: user?.avatar },
+      user: { id: user?.id || user?._id, name: user?.name, avatar: user?.avatar },
     });
   };
 
@@ -425,7 +459,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
       const candidates = sceneTrivia.length > 0 ? sceneTrivia : allTrivia;
 
       if (candidates.length > 0) {
-        const picked = candidates[Math.floor(Math.random() * candidates.length)];
+        const picked = getRandomItem(candidates);
         setTriviaData({
           fact: picked.fact,
           category: picked.category || 'Behind the Scenes',
@@ -487,6 +521,16 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
+  // Copy full invite link
+  const copyInviteLink = () => {
+    if (typeof window !== 'undefined') {
+      const shareUrl = `${window.location.origin}/room/${party.partyId}`;
+      navigator.clipboard.writeText(shareUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    }
+  };
+
   const activeParticipantsCount = participants.length > 0 ? participants.length : 1;
 
   return (
@@ -534,7 +578,7 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
                 </span>
               )}
             </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '10px', marginTop: '2px' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '10px', marginTop: '2px', flexWrap: 'wrap' }}>
               <span>Watch Space Code: <strong style={{ color: 'var(--color-text-bright)', fontFamily: 'monospace' }}>{party.partyId}</strong></span>
               <button
                 onClick={copyPartyCode}
@@ -545,11 +589,33 @@ export function WatchPartyRoom({ party, user, onLeaveParty }) {
                   alignItems: 'center',
                   gap: '4px',
                   fontSize: '0.75rem',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  border: 'none',
+                  padding: '2px 4px'
                 }}
+                title="Copy space code to clipboard"
               >
                 {copiedCode ? <Check size={12} /> : <Copy size={12} />}
-                {copiedCode ? 'Copied' : 'Copy'}
+                {copiedCode ? 'Copied' : 'Copy Code'}
+              </button>
+              <button
+                onClick={copyInviteLink}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  color: copiedLink ? 'var(--color-success)' : 'var(--color-text-bright)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  border: '1px solid var(--color-border-subtle)',
+                  borderRadius: '4px',
+                  padding: '2px 8px'
+                }}
+                title="Copy full shareable watch space URL"
+              >
+                {copiedLink ? <Check size={12} /> : <Copy size={12} />}
+                {copiedLink ? 'Link Copied!' : 'Copy Invite Link'}
               </button>
             </div>
           </div>
