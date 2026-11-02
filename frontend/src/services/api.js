@@ -114,7 +114,9 @@ async function request(endpoint, options = {}) {
 
     return await res.json();
   } catch (err) {
-    if (err.name === 'AbortError') throw err;
+    if (err.name === 'AbortError') {
+      throw new ApiError('Backend request timed out. The server may be waking up from sleep or offline.', null, 'TIMEOUT_ERROR');
+    }
     if (err instanceof ApiError) throw err;
 
     // Detect browser network failure (e.g. server down, CORS rejection, offline)
@@ -133,6 +135,15 @@ async function request(endpoint, options = {}) {
 
 // System Health
 export async function getHealthStatus(signal) {
+  if (!signal && typeof AbortController !== 'undefined') {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    try {
+      return await request(ENDPOINTS.HEALTH, { method: 'GET', signal: controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
   return request(ENDPOINTS.HEALTH, { method: 'GET', signal });
 }
 
