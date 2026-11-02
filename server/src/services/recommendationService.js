@@ -1,10 +1,15 @@
+import mongoose from 'mongoose';
 import { Content } from '../models/Content.js';
 import { User } from '../models/User.js';
+import { sampleCatalog } from '../data/seedContent.js';
 
 export async function getRecommendationsForUser(userId) {
-  const allContent = await Content.find().lean();
-  if (allContent.length === 0) {
-    return [];
+  let allContent = [];
+  if (mongoose.connection.readyState === 1) {
+    allContent = await Content.find().lean();
+  }
+  if (!allContent || allContent.length === 0) {
+    allContent = [...sampleCatalog];
   }
 
   let preferredGenres = ['Sci-Fi', 'Action', 'Animation'];

@@ -153,19 +153,24 @@ export function setupSocketIO(io) {
 
         roomParticipants.get(normalizedPartyId).set(socket.id, participantRecord);
 
-        // Update online status in database
-        if (user?.id && mongoose.isValidObjectId(user.id)) {
-          await WatchParty.updateOne(
-            { partyId: normalizedPartyId, 'participants.userId': user.id },
-            { $set: { 'participants.$.isOnline': true } }
-          );
+        // Update online status in database and fetch recent messages safely
+        let recentMessages = [];
+        if (mongoose.connection.readyState === 1) {
+          try {
+            if (user?.id && mongoose.isValidObjectId(user.id)) {
+              await WatchParty.updateOne(
+                { partyId: normalizedPartyId, 'participants.userId': user.id },
+                { $set: { 'participants.$.isOnline': true } }
+              );
+            }
+            recentMessages = await ChatMessage.find({ partyId: normalizedPartyId })
+              .sort({ createdAt: -1 })
+              .limit(50)
+              .lean();
+          } catch (dbErr) {
+            console.warn('Socket join DB read notice:', dbErr.message);
+          }
         }
-
-        // Fetch recent messages
-        const recentMessages = await ChatMessage.find({ partyId: normalizedPartyId })
-          .sort({ createdAt: -1 })
-          .limit(50)
-          .lean();
 
         // Send current synchronized room state to joining client
         socket.emit('party:state', {
@@ -309,36 +314,43 @@ export function setupSocketIO(io) {
       sanitizedMessage = sanitizedMessage.replace(/[<>]/g, '');
       if (!sanitizedMessage) return;
 
+      const messagePayload = {
+        _id: data._id || `msg-${Date.now()}`,
+        partyId: pId,
+        userId: data.userId || currentUser?.id,
+        userName: data.userName || currentUser?.name || 'Viewer',
+        userAvatar: data.userAvatar || currentUser?.avatar || '',
+        message: sanitizedMessage,
+        videoTime: Number(data.videoTime) || 0,
+        createdAt: data.createdAt || new Date().toISOString(),
+        type: data.type || 'chat',
+      };
+
       if (pId.startsWith('solo-') || pId === 'solo-space') {
-        socket.emit('chat:message', {
-          _id: data._id || `msg-${Date.now()}`,
-          partyId: pId,
-          userId: data.userId || currentUser?.id,
-          userName: data.userName || currentUser?.name || 'Viewer',
-          userAvatar: data.userAvatar || currentUser?.avatar || '',
-          message: sanitizedMessage,
-          videoTime: Number(data.videoTime) || 0,
-          createdAt: data.createdAt || new Date().toISOString(),
-          type: data.type || 'chat',
-        });
+        socket.emit('chat:message', messagePayload);
         return;
       }
 
-      try {
-        const savedMessage = await ChatMessage.create({
-          partyId: pId,
-          userId: data.userId || currentUser?.id,
-          userName: data.userName || currentUser?.name || 'Viewer',
-          userAvatar: data.userAvatar || currentUser?.avatar || '',
-          message: sanitizedMessage,
-          videoTime: Number(data.videoTime) || 0,
-          type: data.type || 'chat',
-        });
+      if (mongoose.connection.readyState === 1) {
+        try {
+          const savedMessage = await ChatMessage.create({
+            partyId: pId,
+            userId: data.userId || currentUser?.id,
+            userName: data.userName || currentUser?.name || 'Viewer',
+            userAvatar: data.userAvatar || currentUser?.avatar || '',
+            message: sanitizedMessage,
+            videoTime: Number(data.videoTime) || 0,
+            type: data.type || 'chat',
+          });
 
-        io.to(pId).emit('chat:message', savedMessage);
-      } catch (err) {
-        console.error('Error saving socket chat message:', err);
+          io.to(pId).emit('chat:message', savedMessage);
+          return;
+        } catch (err) {
+          console.error('Error saving socket chat message:', err);
+        }
       }
+
+      io.to(pId).emit('chat:message', messagePayload);
     });
 
     // 6. Real-Time Emoji Reaction Dispatch

@@ -16,13 +16,15 @@ export async function connectDB() {
     } catch (err) {
       console.warn(`Could not connect to configured MONGODB_URI: ${err.message}`);
       if (process.env.NODE_ENV === 'production') {
-        throw new Error(`Production MongoDB connection failed: ${err.message}`);
+        console.error(`⚠️ [Production Notice] MongoDB Atlas connection failed (${err.message}). Verify Atlas Network Access whitelist (0.0.0.0/0).`);
+        return null;
       }
     }
   } else if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'MONGODB_URI is required in production mode. Please configure MONGODB_URI in your cloud environment settings.'
+    console.warn(
+      '⚠️ [CONFIGURATION NOTICE] MONGODB_URI is not set in environment variables. Database operations will be in degraded mode until MONGODB_URI is provided in Render dashboard.'
     );
+    return null;
   }
 
   // Local / Test In-Memory MongoDB Fallback

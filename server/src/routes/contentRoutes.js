@@ -1,6 +1,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import { Content } from '../models/Content.js';
+import { sampleCatalog } from '../data/seedContent.js';
 
 const router = express.Router();
 
@@ -10,22 +11,53 @@ function escapeRegex(str) {
 
 async function findContentByIdOrSlug(id) {
   if (!id) return null;
-  if (mongoose.isValidObjectId(id)) {
-    const doc = await Content.findById(id);
-    if (doc) return doc;
+  if (mongoose.connection.readyState === 1) {
+    if (mongoose.isValidObjectId(id)) {
+      const doc = await Content.findById(id);
+      if (doc) return doc;
+    }
+    const cleanId = String(id).toLowerCase().trim();
+    if (cleanId === 'tos-001') return await Content.findOne({ title: /Tears of Steel/i });
+    if (cleanId === 'sintel-002') return await Content.findOne({ title: /Sintel/i });
+    if (cleanId === 'bbb-003') return await Content.findOne({ title: /Big Buck Bunny/i });
+    const escaped = escapeRegex(cleanId.replace(/[-_]/g, ' '));
+    const byTitle = await Content.findOne({ title: new RegExp(escaped, 'i') });
+    if (byTitle) return byTitle;
   }
+
+  // Graceful fallback to verified sample catalog if DB is connecting or degraded
   const cleanId = String(id).toLowerCase().trim();
-  if (cleanId === 'tos-001') return await Content.findOne({ title: /Tears of Steel/i });
-  if (cleanId === 'sintel-002') return await Content.findOne({ title: /Sintel/i });
-  if (cleanId === 'bbb-003') return await Content.findOne({ title: /Big Buck Bunny/i });
-  const escaped = escapeRegex(cleanId.replace(/[-_]/g, ' '));
-  return await Content.findOne({ title: new RegExp(escaped, 'i') });
+  if (cleanId === 'tos-001') return sampleCatalog.find((c) => /Tears of Steel/i.test(c.title));
+  if (cleanId === 'sintel-002') return sampleCatalog.find((c) => /Sintel/i.test(c.title));
+  if (cleanId === 'bbb-003') return sampleCatalog.find((c) => /Big Buck Bunny/i.test(c.title));
+  return sampleCatalog.find((c) =>
+    (c._id && String(c._id) === id) || (c.id && String(c.id) === id) || new RegExp(escapeRegex(cleanId.replace(/[-_]/g, ' ')), 'i').test(c.title)
+  ) || null;
 }
 
 // GET /api/content
 router.get('/', async (req, res) => {
   try {
     const { genre, search, featured } = req.query;
+
+    // If MongoDB is not yet connected, return sample catalog directly so catalog never fails
+    if (mongoose.connection.readyState !== 1) {
+      let filtered = [...sampleCatalog];
+      if (genre && genre !== 'All') {
+        filtered = filtered.filter((c) => (c.genre || []).includes(genre));
+      }
+      if (featured === 'true') {
+        filtered = filtered.filter((c) => c.featured);
+      }
+      if (search) {
+        const s = search.toLowerCase();
+        filtered = filtered.filter((c) =>
+          c.title.toLowerCase().includes(s) || c.description.toLowerCase().includes(s)
+        );
+      }
+      return res.json({ items: filtered, count: filtered.length });
+    }
+
     const query = {};
 
     if (genre && genre !== 'All') {

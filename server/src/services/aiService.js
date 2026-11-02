@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { Content } from '../models/Content.js';
+import { sampleCatalog } from '../data/seedContent.js';
 
 /**
  * Format seconds into HH:MM:SS or MM:SS
@@ -21,18 +22,28 @@ function escapeRegex(str) {
 
 async function findContentByIdOrSlug(id) {
   if (!id) return null;
-  if (mongoose.isValidObjectId(id)) {
-    const doc = await Content.findById(id);
-    if (doc) return doc;
+  if (mongoose.connection.readyState === 1) {
+    if (mongoose.isValidObjectId(id)) {
+      const doc = await Content.findById(id);
+      if (doc) return doc;
+    }
+    const cleanId = String(id).toLowerCase().trim();
+    if (cleanId === 'tos-001') return await Content.findOne({ title: /Tears of Steel/i });
+    if (cleanId === 'sintel-002') return await Content.findOne({ title: /Sintel/i });
+    if (cleanId === 'bbb-003') return await Content.findOne({ title: /Big Buck Bunny/i });
+    const escaped = escapeRegex(cleanId.replace(/[-_]/g, ' '));
+    const byTitle = await Content.findOne({ title: new RegExp(escaped, 'i') });
+    if (byTitle) return byTitle;
+    const fallbackDoc = await Content.findOne();
+    if (fallbackDoc) return fallbackDoc;
   }
+
+  // Graceful fallback to sampleCatalog
   const cleanId = String(id).toLowerCase().trim();
-  if (cleanId === 'tos-001') return await Content.findOne({ title: /Tears of Steel/i });
-  if (cleanId === 'sintel-002') return await Content.findOne({ title: /Sintel/i });
-  if (cleanId === 'bbb-003') return await Content.findOne({ title: /Big Buck Bunny/i });
-  const escaped = escapeRegex(cleanId.replace(/[-_]/g, ' '));
-  const byTitle = await Content.findOne({ title: new RegExp(escaped, 'i') });
-  if (byTitle) return byTitle;
-  return await Content.findOne();
+  if (cleanId === 'tos-001') return sampleCatalog.find((c) => /Tears of Steel/i.test(c.title));
+  if (cleanId === 'sintel-002') return sampleCatalog.find((c) => /Sintel/i.test(c.title));
+  if (cleanId === 'bbb-003') return sampleCatalog.find((c) => /Big Buck Bunny/i.test(c.title));
+  return sampleCatalog[0] || null;
 }
 
 /**

@@ -147,23 +147,26 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start Server
+// Start Server (Binds 0.0.0.0 immediately for Render, then connects to DB)
 async function startServer() {
-  try {
-    await connectDB();
-    await seedDatabaseIfEmpty();
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`==================================================`);
+    console.log(`🚀 Netflix AI Watch Spaces Backend running on port ${PORT} (0.0.0.0)`);
+    console.log(`📡 WebSocket / Socket.IO Hub ready`);
+    console.log(`🔍 Health Check: http://localhost:${PORT}/api/v1/health`);
+    console.log(`🎬 Movie Catalog: http://localhost:${PORT}/api/content`);
+    console.log(`==================================================`);
+  });
 
-    server.listen(PORT, () => {
-      console.log(`==================================================`);
-      console.log(`🚀 Netflix AI Watch Spaces Backend running on port ${PORT}`);
-      console.log(`📡 WebSocket / Socket.IO Hub ready`);
-      console.log(`🔍 Health Check: http://localhost:${PORT}/api/v1/health`);
-      console.log(`🎬 Movie Catalog: http://localhost:${PORT}/api/content`);
-      console.log(`==================================================`);
-    });
+  // Connect to database and seed without blocking HTTP health checks or crashing process
+  try {
+    const conn = await connectDB();
+    if (conn) {
+      await seedDatabaseIfEmpty();
+    }
   } catch (err) {
-    console.error('Failed to start server:', err);
-    process.exit(1);
+    console.error('⚠️ [Database Notice] Database initialization delayed:', err.message);
+    console.log('Server remains online to handle health checks and diagnostic status.');
   }
 }
 
