@@ -120,6 +120,22 @@ function App() {
           }
         } catch (err) {
           console.warn('Failed to restore room from URL:', err.message);
+          // If solo room or catalog content fallback, restore room directly
+          if (partyCode.startsWith('solo-')) {
+            const filmId = partyCode.replace('solo-', '');
+            const movie = (catalog || []).find((c) => (c._id || c.id) === filmId);
+            if (movie) {
+              setActiveParty({
+                partyId: partyCode,
+                contentId: movie,
+                title: `${movie.title} Solo Space`,
+                hostId: user?.id || 'viewer',
+                participants: [{ name: user?.name || 'Solo Viewer', role: 'host' }],
+              });
+              setCurrentView('watch_space');
+              return;
+            }
+          }
         }
       }
     } else if (path.startsWith('/watch/')) {

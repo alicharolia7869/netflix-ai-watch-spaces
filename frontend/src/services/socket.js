@@ -1,5 +1,5 @@
 import { io } from 'socket.io-client';
-import { getWebSocketUrl, IS_PRODUCTION } from '../config/api.config';
+import { getWebSocketUrl, DEFAULT_PRODUCTION_BACKEND_URL } from '../config/api.config';
 import { getAuthToken } from './api';
 
 let activeSocket = null;
@@ -13,30 +13,36 @@ let currentConnectedUrl = null;
  * Provides bi-directional video playback sync, presence, live chat, and variation voting.
  */
 export function getSocket(_partyId = 'global') {
-  const targetUrl = getWebSocketUrl();
+  let targetUrl = getWebSocketUrl();
+
+  const isBrowser = typeof window !== 'undefined';
+  const isLocalhost = isBrowser && (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname === '::1'
+  );
+
+  // In production on Vercel, prevent connecting to window.location.origin (which returns HTML & triggers parser errors)
+  if (isBrowser && !isLocalhost) {
+    if (!targetUrl || targetUrl === window.location.origin || targetUrl.includes('vercel.app')) {
+      targetUrl = DEFAULT_PRODUCTION_BACKEND_URL;
+    }
+  }
+
+  const connectionUrl = targetUrl || (isBrowser && isLocalhost ? window.location.origin : 'http://localhost:5000');
 
   // If already connected to the same backend URL, reuse socket
-  if (activeSocket && currentConnectedUrl === targetUrl) {
+  if (activeSocket && currentConnectedUrl === connectionUrl) {
     return activeSocket;
   }
 
-  // If targetUrl changed or socket disconnected, close previous connection
+  // If connectionUrl changed or socket disconnected, close previous connection
   if (activeSocket) {
     activeSocket.disconnect();
     activeSocket = null;
   }
 
-  currentConnectedUrl = targetUrl;
-
-  const isBrowser = typeof window !== 'undefined';
-  const connectionUrl = targetUrl || (isBrowser ? window.location.origin : 'http://localhost:5000');
-
-  // If in production on Vercel and NO external backend URL is configured
-  if (IS_PRODUCTION && !targetUrl) {
-    console.warn(
-      '⚠️ [Real-Time Warning] No deployed backend URL configured. Real-time Socket.IO sync requires VITE_API_URL.'
-    );
-  }
+  currentConnectedUrl = connectionUrl;
 
   activeSocket = io(connectionUrl, {
     transports: ['websocket', 'polling'],

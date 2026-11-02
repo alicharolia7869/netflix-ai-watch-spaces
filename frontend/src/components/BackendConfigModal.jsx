@@ -6,11 +6,12 @@ import {
   setRuntimeApiUrl,
   clearRuntimeApiUrl,
   IS_PRODUCTION,
+  DEFAULT_PRODUCTION_BACKEND_URL,
 } from '../config/api.config';
 
 export function BackendConfigModal({ isOpen, onClose, onConfigUpdated }) {
   const currentUrl = getEffectiveApiUrl();
-  const [inputUrl, setInputUrl] = useState(getRuntimeApiUrl() || currentUrl || '');
+  const [inputUrl, setInputUrl] = useState(getRuntimeApiUrl() || currentUrl || DEFAULT_PRODUCTION_BACKEND_URL);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
@@ -88,7 +89,7 @@ export function BackendConfigModal({ isOpen, onClose, onConfigUpdated }) {
 
   const handleReset = () => {
     clearRuntimeApiUrl();
-    setInputUrl(import.meta.env.VITE_API_URL || '');
+    setInputUrl(import.meta.env.VITE_API_URL || DEFAULT_PRODUCTION_BACKEND_URL);
     setTestResult(null);
     if (onConfigUpdated) onConfigUpdated();
   };
@@ -180,7 +181,7 @@ export function BackendConfigModal({ isOpen, onClose, onConfigUpdated }) {
                 type="url"
                 value={inputUrl}
                 onChange={(e) => setInputUrl(e.target.value)}
-                placeholder="https://your-backend.up.railway.app"
+                placeholder="https://netflix-ai-watch-spaces-backend.onrender.com"
                 style={{
                   width: '100%',
                   padding: '10px 12px 10px 38px',

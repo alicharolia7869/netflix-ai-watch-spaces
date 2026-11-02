@@ -18,6 +18,8 @@ const isLocalhost = isBrowser && (
 
 export const IS_PRODUCTION = import.meta.env.PROD || (isBrowser && !isLocalhost);
 
+export const DEFAULT_PRODUCTION_BACKEND_URL = 'https://netflix-ai-watch-spaces-backend.onrender.com';
+
 const STORAGE_OVERRIDE_KEY = 'watchspaces_api_url_override';
 
 // Check query param for on-the-fly URL linking (?backend=https://...)
@@ -89,13 +91,17 @@ export function getEffectiveApiUrl() {
     return '';
   }
 
-  // 4. Production on Vercel without VITE_API_URL configured
-  return '';
+  // 4. Production on Vercel without VITE_API_URL configured:
+  // Fallback to the live deployed backend on Render so API calls succeed instead of 404ing against Vercel SPA
+  return DEFAULT_PRODUCTION_BACKEND_URL;
 }
 
 // Static export for default imports
 export const API_BASE_URL = getEffectiveApiUrl();
-export const CONFIGURED_API_URL = (import.meta.env.VITE_API_URL || '').trim() || getRuntimeApiUrl() || '';
+export const CONFIGURED_API_URL =
+  (import.meta.env.VITE_API_URL || '').trim() ||
+  getRuntimeApiUrl() ||
+  (IS_PRODUCTION ? DEFAULT_PRODUCTION_BACKEND_URL : '');
 
 // Resolve proper WebSocket URL for Socket.IO
 export function getWebSocketUrl() {
@@ -106,7 +112,7 @@ export function getWebSocketUrl() {
   if (isBrowser && isLocalhost) {
     return window.location.origin;
   }
-  return '';
+  return DEFAULT_PRODUCTION_BACKEND_URL;
 }
 
 export const ENDPOINTS = {
